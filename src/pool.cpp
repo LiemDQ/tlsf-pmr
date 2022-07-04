@@ -1,5 +1,4 @@
-#include "tlsf_resource.hpp"
-
+#include "pool.hpp"
 #include <stdexcept>
 #include <utility>
 #include <cstddef>
@@ -94,8 +93,16 @@ static_assert(sizeof(size_t) * CHAR_BIT <= 64);
 
 using tlsfptr_t = std::ptrdiff_t; 
 
+tlsf_pool::~tlsf_pool(){
+    //NOTE: make sure the tlsf pool outlives any objects whose memory 
+    //is allocated by it! Otherwise this will result in dangling pointers.
+    if (this->memory_pool){
+        free((void*)(this->memory_pool));
+        memory_pool = nullptr;
+    }
+}
 
-void tlsf_resource::initialize(std::size_t size){
+void tlsf_pool::initialize(std::size_t size){
     this->pool_size = size;
     this->block_null = block_header();
     this->memory_pool = (char*) malloc(size);
@@ -112,7 +119,7 @@ void tlsf_resource::initialize(std::size_t size){
     }
 }
 
-char* tlsf_resource::create_memory_pool(std::size_t bytes, char* pool){
+char* tlsf_pool::create_memory_pool(std::size_t bytes, char* pool){
     block_header* block;
     block_header* next;
 
@@ -155,7 +162,7 @@ char* tlsf_resource::create_memory_pool(std::size_t bytes, char* pool){
 }
 
 /* Rounds up to the next block size for allocations */
-void tlsf_resource::mapping_search(std::size_t size, int* fli, int* sli){
+void tlsf_pool::mapping_search(std::size_t size, int* fli, int* sli){
     if (size >= small_block_size){
         const std::size_t round = (1 << (tlsf_fls_sizet(size)-sl_index_count_log2))-1;
         size += round;
@@ -164,7 +171,7 @@ void tlsf_resource::mapping_search(std::size_t size, int* fli, int* sli){
 }
 
 /* mapping insert: computes first level index (fl) and second level index (sl)*/
-void tlsf_resource::mapping_insert(std::size_t size, int* fli, int* sli){
+void tlsf_pool::mapping_insert(std::size_t size, int* fli, int* sli){
     int fl, sl;
     if (size < small_block_size){
         fl = 0;
@@ -180,7 +187,7 @@ void tlsf_resource::mapping_insert(std::size_t size, int* fli, int* sli){
 }
 
 /* adjusts request size to ensure block is aligned with align. */
-std::size_t tlsf_resource::adjust_request_size(std::size_t size, std::size_t align){
+std::size_t tlsf_pool::adjust_request_size(std::size_t size, std::size_t align){
     std::size_t adjust = 0;
     if (size){
         const std::size_t aligned = align_up(size, align);
@@ -192,7 +199,7 @@ std::size_t tlsf_resource::adjust_request_size(std::size_t size, std::size_t ali
 }
 
 /*Removes a block from the free-list and updates the bitmaps.*/
-void tlsf_resource::remove_free_block(block_header* block, int fl, int sl){
+void tlsf_pool::remove_free_block(block_header* block, int fl, int sl){
     block_header* prev = block->prev_free;
     block_header* next = block->next_free;
     assert(prev && "prev_free field cannot be null");
@@ -217,7 +224,7 @@ void tlsf_resource::remove_free_block(block_header* block, int fl, int sl){
 }
 
 /* Given the fl and sl indices, adds a block to the free-list and updates the bitmaps. */
-void tlsf_resource::insert_free_block(block_header* block, int fl, int sl){
+void tlsf_pool::insert_free_block(block_header* block, int fl, int sl){
     block_header* current = this->blocks[fl][sl];
     assert(current && "free list cannot have a null entry");
     assert(block && "cannot insert a null entry into the free list");
@@ -235,7 +242,7 @@ void tlsf_resource::insert_free_block(block_header* block, int fl, int sl){
 }
 
 /* finds the block closest in size given a fl and sl index*/
-tlsf_resource::block_header* tlsf_resource::search_suitable_block(int* fli, int* sli){
+tlsf_pool::block_header* tlsf_pool::search_suitable_block(int* fli, int* sli){
     int fl = *fli;
     int sl = *sli;
 
@@ -267,7 +274,7 @@ tlsf_resource::block_header* tlsf_resource::search_suitable_block(int* fli, int*
  * removes a block from the free-list.
  * Free-list location is calculated from the bitmaps and the block size.
  */
-void tlsf_resource::block_remove(block_header* block){
+void tlsf_pool::block_remove(block_header* block){
     int fl, sl;
     this->mapping_insert(block->get_size(), &fl, &sl);
     this->remove_free_block(block, fl, sl);
@@ -277,18 +284,18 @@ void tlsf_resource::block_remove(block_header* block){
  * Inserts a block into the free-list.
  * Free-list location is calculated from the bitmaps and the block size.
  */
-void tlsf_resource::block_insert(block_header* block){
+void tlsf_pool::block_insert(block_header* block){
     int fl, sl;
     this->mapping_insert(block->get_size(), &fl, &sl);
     insert_free_block(block, fl, sl);
 }
 
-bool tlsf_resource::block_can_split(block_header* block, std::size_t size){
+bool tlsf_pool::block_can_split(block_header* block, std::size_t size){
     return block->get_size() >= sizeof(block_header)+size;
 }
 
 
-tlsf_resource::block_header* tlsf_resource::block_split(block_header* block, std::size_t size){
+tlsf_pool::block_header* tlsf_pool::block_split(block_header* block, std::size_t size){
     block_header* remaining = block_header::offset_to_block(block->to_void_ptr(), size-block_header::block_header_overhead);
 
     const size_t remain_size = block->get_size() - (size+block_header::block_header_overhead);
@@ -306,7 +313,7 @@ tlsf_resource::block_header* tlsf_resource::block_split(block_header* block, std
 }
 
 /* Trims off any trailing block space over size, and returns it to the pool.*/
-void tlsf_resource::trim_free(block_header* block, std::size_t size){
+void tlsf_pool::trim_free(block_header* block, std::size_t size){
     assert(block->is_free() && "block must be free");
     if (this->block_can_split(block, size)) {
         block_header* remaining_block = this->block_split(block, size);
@@ -317,7 +324,7 @@ void tlsf_resource::trim_free(block_header* block, std::size_t size){
 }
 
 /*Trims trailing block space off the end of a used block, returns it to the pool*/
-void tlsf_resource::trim_used(block_header* block, std::size_t size){
+void tlsf_pool::trim_used(block_header* block, std::size_t size){
     assert(!block->is_free() && "block must be used.");
     if (this->block_can_split(block, size)) {
         block_header* remaining_block = this->block_split(block, size);
@@ -327,7 +334,7 @@ void tlsf_resource::trim_used(block_header* block, std::size_t size){
     }    
 }
 
-tlsf_resource::block_header* tlsf_resource::trim_free_leading(block_header* block, std::size_t size){
+tlsf_pool::block_header* tlsf_pool::trim_free_leading(block_header* block, std::size_t size){
     block_header* remaining_block = block;
     if (this->block_can_split(block, size)){
         //we want the second block
@@ -340,7 +347,7 @@ tlsf_resource::block_header* tlsf_resource::trim_free_leading(block_header* bloc
     return remaining_block;
 }
 
-tlsf_resource::block_header* tlsf_resource::block_coalesce(block_header* prev, block_header* block){
+tlsf_pool::block_header* tlsf_pool::block_coalesce(block_header* prev, block_header* block){
     assert(!prev->is_last() && "previous block can't be last");
     // leaves flags untouched
     prev->size += block->get_size() + block_header::block_header_overhead;
@@ -348,7 +355,7 @@ tlsf_resource::block_header* tlsf_resource::block_coalesce(block_header* prev, b
     return prev;
 }
 
-tlsf_resource::block_header* tlsf_resource::merge_prev(block_header* block){
+tlsf_pool::block_header* tlsf_pool::merge_prev(block_header* block){
     if (block->is_prev_free()){
         block_header* prev = block->prev_phys_block;
         assert(prev && "prev physical block cannot be null");
@@ -359,7 +366,7 @@ tlsf_resource::block_header* tlsf_resource::merge_prev(block_header* block){
     return block;
 }
 
-tlsf_resource::block_header* tlsf_resource::merge_next(block_header* block){
+tlsf_pool::block_header* tlsf_pool::merge_next(block_header* block){
     block_header* next = block->get_next();
     assert(next && "next physical block cannot be null.");
     if (next->is_free()){
@@ -371,19 +378,19 @@ tlsf_resource::block_header* tlsf_resource::merge_next(block_header* block){
 }
 
 /* rounds up to power of two size */
-constexpr std::size_t tlsf_resource::align_up(std::size_t x, std::size_t align){
+constexpr std::size_t tlsf_pool::align_up(std::size_t x, std::size_t align){
     assert(0 == (align & (align-1)) && "must align to a power of two");
     return (x + (align -1)) & ~(align -1);
 }
 
 /* rounds down to power of two size */
-constexpr std::size_t tlsf_resource::align_down(std::size_t x, std::size_t align){
+constexpr std::size_t tlsf_pool::align_down(std::size_t x, std::size_t align){
     assert(0 == (align & (align -1)) && "must align to a power of two");
     return x + (x & (align -1));
 }
 
 /* aligns pointer to machine word */
-void* tlsf_resource::align_ptr(const void* ptr, std::size_t align){
+void* tlsf_pool::align_ptr(const void* ptr, std::size_t align){
     const tlsfptr_t aligned = 
         (TLSF_CAST(tlsfptr_t, ptr) + (align -1)) & ~(align-1);
     assert(0 == (align & (align-1)) && "must align to a power of two");
@@ -391,7 +398,7 @@ void* tlsf_resource::align_ptr(const void* ptr, std::size_t align){
 }
 
 /* Locates a free block in the pool, and if successful, removes it from the free-list.*/
-tlsf_resource::block_header* tlsf_resource::locate_free(std::size_t size){
+tlsf_pool::block_header* tlsf_pool::locate_free(std::size_t size){
     int fl = 0, sl = 0;
     block_header* block = nullptr;
     if (size){
@@ -408,36 +415,45 @@ tlsf_resource::block_header* tlsf_resource::locate_free(std::size_t size){
 }
 
 /*Marks the block as used, trims excess space from it and returns a ptr to the block.*/
-void* tlsf_resource::prepare_used(block_header* block, std::size_t size){
+void* tlsf_pool::prepare_used(block_header* block, std::size_t size){
     void* p = nullptr;
     if (block){
         assert(size && "size must be non-zero");
-        tlsf_resource::trim_free(block, size);
+        tlsf_pool::trim_free(block, size);
         block->mark_as_used();
         p = block->to_void_ptr();
     }
     return p;
 }
 
-void* tlsf_resource::malloc_pool(std::size_t size){
+void* tlsf_pool::malloc_pool(std::size_t size){
     const std::size_t adjust = this->adjust_request_size(size, this->align_size);
     block_header* block = this->locate_free(size);
 
     return this->prepare_used(block, adjust);
 }
 
-void tlsf_resource::free_pool(void* ptr){
+
+bool tlsf_pool::free_pool(void* ptr){
     if(ptr){
         block_header* block = block_header::from_void_ptr(ptr);
+        //need to ensure that the memory address is part of the memory pool
+        //otherwise defer deallocation to the upstream memory resource
+        if (TLSF_CAST(char*, block) > this->memory_pool + this->pool_size 
+            || TLSF_CAST(char*, block) < this->memory_pool )
+                return false;
+            
         assert(!block->is_free() && "block already marked as free");
         block->mark_as_free();
         block = this->merge_prev(block);
         block = this->merge_next(block);
         this->block_insert(block);
+        return true;
     }
+    return false;
 }
 
-void* tlsf_resource::realloc_pool(void* ptr, std::size_t size){
+void* tlsf_pool::realloc_pool(void* ptr, std::size_t size){
     void* p = nullptr;
     //zero-size requests are treated as freeing the block.
     if(ptr && size == 0){
@@ -483,7 +499,7 @@ void* tlsf_resource::realloc_pool(void* ptr, std::size_t size){
     return p;
 }
 
-void* tlsf_resource::memalign(std::size_t align, std::size_t size){
+void* tlsf_pool::memalign(std::size_t align, std::size_t size){
     
     const size_t adjust = this->adjust_request_size(size, this->align_size);
     /**
@@ -531,35 +547,4 @@ void* tlsf_resource::memalign(std::size_t align, std::size_t size){
     }
     return this->prepare_used(block, adjust);
 }
-
-void* tlsf_resource::do_allocate(std::size_t bytes, std::size_t) {
-    //TODO: look into whether the second argument (alignment) matters at all
-    void* ptr = this->malloc_pool(bytes);
-    if (ptr == nullptr && bytes > 0) {
-        throw std::bad_alloc();
-    }
-    return ptr;
-}
-
-void tlsf_resource::do_deallocate(void* p, std::size_t, std::size_t ){
-    //TODO: look into whether the second and third arguments matter at all
-    this->free_pool(p);
-}
-
-bool tlsf_resource::do_is_equal(const tlsf_resource& other) const noexcept {
-    return this->memory_pool == other.memory_pool;
-}
-
-bool tlsf_resource::do_is_equal(const std::pmr::memory_resource& other) const noexcept {
-    #if defined(RTTI_ENABLED)
-        const auto cast = dynamic_cast<const tlsf_resource*>(&other);
-        if (cast){
-            return this->memory_pool == cast->memory_pool;
-        } else 
-            return false;
-    #else
-        return false;
-    #endif
-}
-
 } //namespace tlsf

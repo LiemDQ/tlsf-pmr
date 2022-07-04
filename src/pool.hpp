@@ -5,7 +5,6 @@
 #include <memory_resource>
 #include <utility>
 
-
 #if INTPTR_MAX == INT64_MAX
 #define TLSF_64BIT
 #elif INTPTR_MAX == INT32_MAX
@@ -14,50 +13,50 @@
 #error Unsupported bitness architecture for TLSF allocator.
 #endif
 
+//TODO: move this into .cpp file (will need to move block header implementation as well)
 #define TLSF_CAST(t, exp) ((t)(exp))
 
 namespace tlsf {
 
-using tlsfptr_t = std::ptrdiff_t;
 /**
- * @brief Two-level segregated fit memory allocator and memory resource. 
- * 
- * 
+ * @brief This is a lower level construct that contains the implementation details
+ * of the TLSF algorithm. Unless you are implementing your own memory resource or need the lower-level
+ * control, you should be using `tlsf_resource` or `synchronized_tlsf_resource` instead. 
  * 
  */
-class tlsf_resource : public std::pmr::memory_resource {
+class tlsf_pool {
+
     public:
         static constexpr std::size_t DEFAULT_POOL_SIZE = 1024*1024;
 
-        explicit tlsf_resource(std::size_t size){
-            initialize(size);
-        };
 
-        explicit tlsf_resource() noexcept: memory_pool(nullptr){
-            initialize(DEFAULT_POOL_SIZE);
-        }
-        
-        tlsf_resource(const tlsf_resource& resource) noexcept 
-        : memory_pool(resource.memory_pool), pool_size(resource.pool_size) {}
-        
-        ~tlsf_resource(){
-            //NOTE: make sure the tlsf resource outlives any objects whose memory 
-            //is allocated by it! Otherwise this will result in dangling pointers.
-            if (this->memory_pool){
-                free((void*)(this->memory_pool));
-                memory_pool = nullptr;
-            }
+        explicit tlsf_pool(std::size_t bytes){ this->initialize(bytes); }
+        explicit tlsf_pool() { this->initialize(DEFAULT_POOL_SIZE); }
+        explicit tlsf_pool(std::size_t bytes, std::pmr::memory_resource* upstream)  {
+            this->initialize(bytes);
         }
 
+
+        ~tlsf_pool();
+
+        void* malloc_pool(std::size_t size);
+        bool free_pool(void* ptr);
+        void* realloc_pool(void* ptr, std::size_t size);
+      
+        inline bool is_allocated() const { return this->memory_pool != nullptr; }
+        inline bool operator==(const tlsf_pool& other) const {
+            return this->memory_pool == other.memory_pool && this->memory_pool != nullptr;
+        }
+    
     private:
-
-        /**
-         * TLSF block header. 
-         * According to the TLSF specification:
-         * - the prev_phys_block fields is only valid if the previous block is free
-         * - the prev_phys_block is actually stored at the end of the previous block. This arrangement simplifies the implementation.
-         * - The next_free and prev_free are only valid if the block is free.
-         */
+        using tlsfptr_t = ptrdiff_t;
+            /**
+             * TLSF block header. 
+             * According to the TLSF specification:
+             * - the prev_phys_block fields is only valid if the previous block is free
+             * - the prev_phys_block is actually stored at the end of the previous block. This arrangement simplifies the implementation.
+             * - The next_free and prev_free are only valid if the block is free.
+             */
         struct block_header {
             block_header* prev_phys_block;
             std::size_t size;
@@ -110,7 +109,7 @@ class tlsf_resource : public std::pmr::memory_resource {
             }
 
             block_header* get_next(){
-                block_header* next = this->offset_to_block(this->to_void_ptr(), this->get_size()-tlsf_resource::block_start_offset);
+                block_header* next = this->offset_to_block(this->to_void_ptr(), this->get_size()-tlsf_pool::block_start_offset);
                 assert(!this->is_last());
                 return next;
             }
@@ -162,9 +161,9 @@ class tlsf_resource : public std::pmr::memory_resource {
          * Allocations of sizes up to (1 << fl_index_max) are supported.
          * Because we linearly subdivide the second-level lists and the minimum size block
          * is N bytes, it doesn't make sense ot create first-level lists for sizes smaller than
-         * sl_index_count * N or (1 << (sl_index_count_log2 + log(N))) bytes, as we will be trying to split
-         * size ranges into more slots than we have available. We calculate the minimum threshold
-         * size, and place all blocks below that size into the 0th first-level list. 
+         * sl_index_count * N or (1 << (sl_index_count_log2 + log(N))) bytes, as we will be trying to split size ranges 
+         * into more slots than we have available. 
+         * We calculate the minimum threshold size, and place all blocks below that size into the 0th first-level list. 
          */
         static constexpr int sl_index_count = (1 << sl_index_count_log2);
         static constexpr int fl_index_shift = (sl_index_count_log2 + align_size_log2);
@@ -179,7 +178,7 @@ class tlsf_resource : public std::pmr::memory_resource {
         static constexpr std::size_t block_size_max = static_cast<std::size_t>(1) << fl_index_max;
         static constexpr std::size_t pool_overhead = 2*block_header::block_header_overhead;
         static constexpr std::size_t tlsf_alloc_overhead = block_header::block_header_overhead;
-    
+
         block_header block_null;
         unsigned int fl_bitmap;
         unsigned int sl_bitmap[fl_index_count];
@@ -192,25 +191,14 @@ class tlsf_resource : public std::pmr::memory_resource {
         static constexpr std::size_t align_down(std::size_t x, std::size_t align);
         static void* align_ptr(const void* ptr, std::size_t align);
         char* create_memory_pool(std::size_t bytes, char* pool);
-        
 
-        
-        void* malloc_pool(std::size_t size);
-        void free_pool(void* ptr);
-        void* realloc_pool(void* ptr, std::size_t size);
         
         //TODO:
         // Implement memalign and placement new functionality for this memory resource.
         // What does it mean to have placement new and alignment when the block partitioning 
         // is done by the underlying implementation anyway? Can we overwrite the same block?
         void* memalign(std::size_t align, std::size_t size);
-
-        void* do_allocate(std::size_t bytes, std::size_t alignment) override;
-        void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override;
-
-        bool do_is_equal(const tlsf_resource& other) const noexcept;
-        bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override;
-
+        
         /**
          * TLSF utility functions 
          * Based on the implementation described in this paper:
@@ -241,8 +229,7 @@ class tlsf_resource : public std::pmr::memory_resource {
         void* prepare_used(block_header* block, std::size_t size);
 
         char* memory_pool;
-        std::size_t pool_size;
-        std::pmr::memory_resource* upstream;
+        std::size_t pool_size; //in bytes
 };
 
 } //namespace tlsf
