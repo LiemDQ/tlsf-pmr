@@ -9,6 +9,9 @@
 #include <cstring>
 #include <memory_resource>
 
+
+#define TLSF_CAST(t, exp) ((t)(exp))
+
 namespace tlsf {
 
 /**
@@ -19,22 +22,22 @@ namespace tlsf {
 #if defined(__GNUC__) && (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4)) \
     && defined(__GNUC_PATCHLEVEL__)
 
-static inline int tlsf_ffs(unsigned int word){
+inline int tlsf_ffs(unsigned int word){
     return __builtin_ffs(word)-1;
 }
 
 template <typename T>
-T TLSF_MIN(T a, T b){
+T tlsf_min(T a, T b){
     return a < b ? a : b;
 }
 
 template <typename T>
-T TLSF_MAX(T a, T b){
+T tlsf_max(T a, T b){
     return a > b ? a : b;
 }
 
 
-static inline int tlsf_fls(unsigned int word){
+inline int tlsf_fls(unsigned int word){
     const int bit = word ? 32 - __builtin_clz(word) : 0;
     return bit-1;
 }
@@ -71,7 +74,7 @@ static inline int tlsf_fls(unsigned int word){
 //     return tlsf_fls(size);
 // }
 
-static inline int tlsf_fls_sizet(size_t size){
+int tlsf_fls_sizet(size_t size){
     int high = (int)(size >> 32);
     int bits = 0;
     if (high) {
@@ -92,6 +95,25 @@ static_assert(sizeof(size_t) * CHAR_BIT >= 32);
 static_assert(sizeof(size_t) * CHAR_BIT <= 64);
 
 using tlsfptr_t = std::ptrdiff_t; 
+
+inline bool tlsf_pool::block_header::is_last() const { return this->get_size() == 0;}
+inline bool tlsf_pool::block_header::is_free() const { return TLSF_CAST(int, this->size & this->block_header_free_bit);}
+inline bool tlsf_pool::block_header::is_prev_free() const { return TLSF_CAST(int, this->size & this->block_header_prev_free_bit);}
+
+void* tlsf_pool::block_header::to_void_ptr() const {
+    return TLSF_CAST(void*, TLSF_CAST(unsigned char*, this) + block_start_offset);
+}
+
+tlsf_pool::block_header* tlsf_pool::block_header::from_void_ptr(const void* ptr){
+    //note the intermediate conversion to char ptr is to get 1-byte displacements.
+    return TLSF_CAST(block_header*, TLSF_CAST(unsigned char*, ptr)-block_start_offset);
+}
+
+/*Returns a block pointer offset from the passed ptr by the size given*/
+tlsf_pool::block_header* tlsf_pool::block_header::offset_to_block(const void* ptr, std::size_t blk_size){
+    //possiblyt could remove ptr and use block->to_void_ptr instead.
+    return TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
+}
 
 tlsf_pool::~tlsf_pool(){
     //NOTE: make sure the tlsf pool outlives any objects whose memory 
@@ -192,7 +214,7 @@ std::size_t tlsf_pool::adjust_request_size(std::size_t size, std::size_t align){
     if (size){
         const std::size_t aligned = align_up(size, align);
         if (aligned < block_size_max){
-            adjust = TLSF_MAX(aligned, block_size_min);
+            adjust = tlsf_max(aligned, block_size_min);
         }
     }
     return adjust;
@@ -208,11 +230,11 @@ void tlsf_pool::remove_free_block(block_header* block, int fl, int sl){
     prev->next_free = next;
 
     // if block is head of the free list, set new head
-    if (blocks[fl][sl] == block){
-        blocks[fl][sl] = next;
+    if (this->blocks[fl][sl] == block){
+        this->blocks[fl][sl] = next;
 
         //if the new head is null, clear the bitmap
-        if (next == &block_null) {
+        if (next == &this->block_null) {
             sl_bitmap[fl] &= ~(1U << sl);
             // if the second bitmap is empty, clear the fl bitmap
             if (!sl_bitmap[fl]) {
@@ -287,7 +309,7 @@ void tlsf_pool::block_remove(block_header* block){
 void tlsf_pool::block_insert(block_header* block){
     int fl, sl;
     this->mapping_insert(block->get_size(), &fl, &sl);
-    insert_free_block(block, fl, sl);
+    this->insert_free_block(block, fl, sl);
 }
 
 bool tlsf_pool::block_can_split(block_header* block, std::size_t size){
@@ -426,7 +448,7 @@ void* tlsf_pool::prepare_used(block_header* block, std::size_t size){
     return p;
 }
 
-void* tlsf_pool::malloc_pool(std::size_t size){
+void* tlsf_pool::malloc(std::size_t size){
     const std::size_t adjust = this->adjust_request_size(size, this->align_size);
     block_header* block = this->locate_free(size);
 
@@ -434,7 +456,7 @@ void* tlsf_pool::malloc_pool(std::size_t size){
 }
 
 
-bool tlsf_pool::free_pool(void* ptr){
+bool tlsf_pool::free(void* ptr){
     if(ptr){
         block_header* block = block_header::from_void_ptr(ptr);
         //need to ensure that the memory address is part of the memory pool
@@ -453,15 +475,15 @@ bool tlsf_pool::free_pool(void* ptr){
     return false;
 }
 
-void* tlsf_pool::realloc_pool(void* ptr, std::size_t size){
+void* tlsf_pool::realloc(void* ptr, std::size_t size){
     void* p = nullptr;
     //zero-size requests are treated as freeing the block.
     if(ptr && size == 0){
-        this->free_pool(ptr);
+        this->free(ptr);
     }
     // nullptrs are treated as malloc
     else if (!ptr){
-        p = this->malloc_pool(size);
+        p = this->malloc(size);
     }
     else {
         block_header* block = block->from_void_ptr(ptr);
@@ -478,11 +500,11 @@ void* tlsf_pool::realloc_pool(void* ptr, std::size_t size){
          * offer enough space, we must reallocate and copy.
          */
         if (adjust > cursize && (!next->is_free() || adjust > combined)) {
-            p = this->malloc_pool(size);
+            p = this->malloc(size);
             if (p) {
-                const size_t minsize = TLSF_MIN(cursize, size);
+                const size_t minsize = tlsf_min(cursize, size);
                 memcpy(p, ptr, minsize);
-                this->free_pool(ptr);
+                this->free(ptr);
             }
         }
         else {
@@ -531,7 +553,7 @@ void* tlsf_pool::memalign(std::size_t align, std::size_t size){
         // if gap size is too small, offset to next aligned boundary
         if (gap && gap < gap_minimum){
             const size_t gap_remain = gap_minimum - gap;
-            const size_t offset = TLSF_MAX(gap_remain, align);
+            const size_t offset = tlsf_max(gap_remain, align);
             const void* next_aligned = TLSF_CAST(void*, 
                 TLSF_CAST(tlsfptr_t, aligned)-offset);
             

@@ -5,7 +5,6 @@
 
 namespace tlsf {
 
-using tlsfptr_t = std::ptrdiff_t;
 /**
  * @brief Two-level segregated fit memory allocator and memory resource. 
  * 
@@ -20,12 +19,9 @@ class tlsf_resource : public std::pmr::memory_resource {
         explicit tlsf_resource() noexcept: memory_pool() {}
         explicit tlsf_resource(std::size_t size, std::pmr::memory_resource* upstream): memory_pool(size), upstream(upstream) {}
         
-        tlsf_resource(const tlsf_resource& resource) noexcept 
-        : memory_pool(resource.memory_pool) {}
+        explicit tlsf_resource(const tlsf_resource& resource) noexcept: memory_pool(resource.memory_pool) {}
         
-        std::pmr::memory_resource* upstream_resource() const {
-            return this->upstream;
-        }
+        inline std::pmr::memory_resource* upstream_resource() const { return this->upstream; }
 
     private:
 

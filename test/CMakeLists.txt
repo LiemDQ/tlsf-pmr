@@ -17,7 +17,8 @@ enable_testing()
 
 add_executable(
     tlsf_test
-    tlsf_test.cpp
+    test_tlsf_resource.cpp
+    test_pool.cpp
 )
 
 target_link_libraries(

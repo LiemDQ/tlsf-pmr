@@ -14,9 +14,14 @@
 #endif
 
 //TODO: move this into .cpp file (will need to move block header implementation as well)
-#define TLSF_CAST(t, exp) ((t)(exp))
+
 
 namespace tlsf {
+
+inline int tlsf_ffs(unsigned int word);
+inline int tlsf_fls(unsigned int word);
+
+int tlsf_fls_sizet(size_t size);
 
 /**
  * @brief This is a lower level construct that contains the implementation details
@@ -39,9 +44,9 @@ class tlsf_pool {
 
         ~tlsf_pool();
 
-        void* malloc_pool(std::size_t size);
-        bool free_pool(void* ptr);
-        void* realloc_pool(void* ptr, std::size_t size);
+        void* malloc(std::size_t size);
+        bool free(void* ptr);
+        void* realloc(void* ptr, std::size_t size);
       
         inline bool is_allocated() const { return this->memory_pool != nullptr; }
         inline bool operator==(const tlsf_pool& other) const {
@@ -78,35 +83,23 @@ class tlsf_pool {
             static constexpr std::size_t block_header_prev_free_bit = 1 << 1;
             static constexpr std::size_t block_header_overhead = sizeof(std::size_t);
 
-            std::size_t get_size() const { 
+            inline std::size_t get_size() const { 
                 //must filter out last two bits
                 return this->size & ~(this->block_header_free_bit | this->block_header_prev_free_bit);
             }
 
-            void set_size(std::size_t new_size){
+            inline void set_size(std::size_t new_size){
                 const std::size_t old_size = this->size;
                 //must retain the last two bits regardless of the new size
                 this->size = new_size | (old_size & (this->block_header_free_bit | this->block_header_prev_free_bit));
             };
 
-            bool is_last() const { return this->get_size() == 0;}
-            bool is_free() const { return TLSF_CAST(int, this->size & this->block_header_free_bit);}
-            bool is_prev_free() const { return TLSF_CAST(int, this->size & this->block_header_prev_free_bit);}
-
-
-            static block_header* from_void_ptr(const void* ptr){
-                //note the intermediate conversion to char ptr is to get 1-byte displacements.
-                return TLSF_CAST(block_header*, TLSF_CAST(unsigned char*, ptr)-block_start_offset);
-            }
-
-            void* to_void_ptr() const {
-                return TLSF_CAST(void*, TLSF_CAST(unsigned char*, this) + block_start_offset);
-            }
-            /*Returns a block pointer offset from the passed ptr by the size given*/
-            static block_header* offset_to_block(const void* ptr, std::size_t blk_size){
-                //possiblyt could remove ptr and use block->to_void_ptr instead.
-                return TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
-            }
+            bool is_last() const;
+            bool is_free() const;
+            bool is_prev_free() const;
+            void* to_void_ptr() const;
+            static block_header* from_void_ptr(const void* ptr);
+            static block_header* offset_to_block(const void* ptr, std::size_t blk_size);    
 
             block_header* get_next(){
                 block_header* next = this->offset_to_block(this->to_void_ptr(), this->get_size()-tlsf_pool::block_start_offset);
@@ -178,11 +171,14 @@ class tlsf_pool {
         static constexpr std::size_t block_size_max = static_cast<std::size_t>(1) << fl_index_max;
         static constexpr std::size_t pool_overhead = 2*block_header::block_header_overhead;
         static constexpr std::size_t tlsf_alloc_overhead = block_header::block_header_overhead;
-
+        
+        //reference empty block
         block_header block_null;
+
         unsigned int fl_bitmap;
         unsigned int sl_bitmap[fl_index_count];
 
+        //internal block storage
         block_header* blocks[fl_index_count][sl_index_count];
 
         void initialize(std::size_t size);
