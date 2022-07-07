@@ -5,7 +5,12 @@ namespace tlsf {
 void* tlsf_resource::do_allocate(std::size_t bytes, std::size_t align) {
     //TODO: look into whether the second argument (alignment) matters at all
     //block allocation has its own alignment size, and the requested alignment does not matter.
-    void* ptr = this->memory_pool.malloc_pool(bytes);
+    void* ptr;
+    if (align){
+        ptr = this->memory_pool.memalign_pool(bytes, align);
+    } else {
+        ptr = this->memory_pool.malloc_pool(bytes);
+    }
 
     //if nullptr is returned, allocation has failed. Defer to upstream resource. 
     if (ptr == nullptr && bytes > 0) {
@@ -22,6 +27,14 @@ void tlsf_resource::do_deallocate(void* p, std::size_t bytes, std::size_t align 
     }
 }
 
+/**
+ * @brief A tlsf resource is considered equal to another if they both point to the same memory pool. 
+ * Because the allocation is done internally, this effectively means that a `tlsf_resource` is only equal to itself.
+ * 
+ * @param other 
+ * @return true 
+ * @return false 
+ */
 bool tlsf_resource::do_is_equal(const tlsf_resource& other) const noexcept {
     return this->memory_pool == other.memory_pool;
 }
@@ -32,7 +45,7 @@ bool tlsf_resource::do_is_equal(const tlsf_resource& other) const noexcept {
  * in order for the comparison to be meaningful. If RTTI is disabled, then this always returns false.
  * 
  * @param other  
- * @return Whether the resources point to the same memory pool. If the other resource is not a tlsf resource, returns false.
+ * @return Whether the resources point to the same memory pool. If the other resource is not a tlsf resource, always returns false.
  */
 bool tlsf_resource::do_is_equal(const std::pmr::memory_resource& other) const noexcept {
     #ifdef __GXX_RTTI
