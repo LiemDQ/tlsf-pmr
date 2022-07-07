@@ -1,5 +1,6 @@
 #include "block.hpp"
 #include <cassert>
+#include <cstdint>
 
 namespace tlsf {
 namespace detail {
@@ -92,7 +93,7 @@ std::size_t align_up(std::size_t x, std::size_t align){
  */
 std::size_t align_down(std::size_t x, std::size_t align){
     assert(0 == (align & (align -1)) && "must align to a power of two");
-    return x + (x & (align -1));
+    return x - (x & (align -1));
 }
 
 /**
@@ -132,28 +133,6 @@ void mapping_insert(std::size_t size, int* fli, int* sli){
     *sli = sl;
 }
 
-bool block_can_split(block_header* block, std::size_t size){
-    return block->get_size() >= sizeof(block_header)+size;
-}
-
-
-block_header* block_split(block_header* block, std::size_t size){
-    block_header* remaining = block_header::offset_to_block(block->to_void_ptr(), size-BLOCK_HEADER_OVERHEAD);
-
-    const size_t remain_size = block->get_size() - (size+BLOCK_HEADER_OVERHEAD);
-    assert(remaining->to_void_ptr() == align_ptr(remaining->to_void_ptr(), ALIGN_SIZE) 
-        && "remaining block not aligned properly");
-    
-    assert(block->get_size() == remain_size + size + BLOCK_HEADER_OVERHEAD);
-    remaining->set_size(remain_size);
-    assert(remaining->get_size() >= BLOCK_SIZE_MIN && "block split with invalid (too small) size");
-
-    block->set_size(size);
-    remaining->mark_as_free();
-    
-    return remaining;
-}
-
 /**
  * @brief Aligns pointer to machine word
  * 
@@ -173,7 +152,7 @@ void* align_ptr(const void* ptr, std::size_t align){
  * 
  * @param size the requested size of the block.
  * @param align 
- * @return std::size_t 
+ * @return std::size_t The adjusted size. Returns 0 if a size of 0 is passed as an argument.
  */
 std::size_t adjust_request_size(std::size_t size, std::size_t align){
     std::size_t adjust = 0;
@@ -186,6 +165,29 @@ std::size_t adjust_request_size(std::size_t size, std::size_t align){
     return adjust;
 }
 
+/**
+ * @brief Split off a block of size bytes from another block. 
+ * 
+ * @param block 
+ * @param size 
+ * @return block_header* The new block formed from the split-off memory.
+ */
+block_header* block_split(block_header* block, std::size_t size){
+    block_header* remaining = block_header::offset_to_block(block->to_void_ptr(), size-BLOCK_HEADER_OVERHEAD);
+
+    const size_t remain_size = block->get_size() - (size+BLOCK_HEADER_OVERHEAD);
+    assert(remaining->to_void_ptr() == align_ptr(remaining->to_void_ptr(), ALIGN_SIZE) 
+        && "remaining block not aligned properly");
+    
+    assert(block->get_size() == remain_size + size + BLOCK_HEADER_OVERHEAD);
+    remaining->set_size(remain_size);
+    assert(remaining->get_size() >= BLOCK_SIZE_MIN && "block split with invalid (too small) size");
+
+    block->set_size(size);
+    remaining->mark_as_free();
+    
+    return remaining;
+}
 
 /**
  * @brief Combines two adjacent blocks into a single block.
@@ -210,16 +212,15 @@ block_header* block_coalesce(block_header* prev, block_header* block){
 bool block_header::is_last() const { return this->get_size() == 0;}
 bool block_header::is_free() const { return TLSF_CAST(bool, this->size & BLOCK_HEADER_FREE_BIT);}
 bool block_header::is_prev_free() const { return TLSF_CAST(bool, this->size & BLOCK_HEADER_PREV_FREE_BIT);}
-
+bool block_header::can_split(std::size_t size) const { return this->get_size() >= sizeof(block_header) + size; }
 /**
  * @brief Obtain a pointer to the raw memory inside the block, skipping past the block header.
  * 
  * @return void* 
  */
 void* block_header::to_void_ptr() const {
-    return TLSF_CAST(void*, TLSF_CAST(unsigned char*, this) + BLOCK_START_OFFSET);
+    return TLSF_CAST(void*, TLSF_CAST(uint8_t*, this) + BLOCK_START_OFFSET);
 }
-
 
 /**
  * @brief Get the block pointer from the void ptr to the raw memory inside the block.
@@ -228,13 +229,21 @@ void* block_header::to_void_ptr() const {
  * @return block_header* 
  */
 block_header* block_header::from_void_ptr(const void* ptr){
-    //note the intermediate conversion to unsigned char ptr is to get 1-byte displacements.
-    return TLSF_CAST(block_header*, TLSF_CAST(unsigned char*, ptr)-BLOCK_START_OFFSET);
+    //note the intermediate conversion to unsigned char ptr is to get 1-byte arithmetic.
+    return TLSF_CAST(block_header*, TLSF_CAST(unsigned char*, ptr) - BLOCK_START_OFFSET);
 }
 
-/*Returns a block pointer offset from the passed ptr by the size given*/
+/**
+ * @brief Returns a block pointer offset from the passed ptr by blk_size.
+ * When blk_size is the size of the block memory, this effectively returns a pointer to the
+ * next block.
+ * 
+ * @param ptr 
+ * @param blk_size 
+ * @return block_header* 
+ */
 block_header* block_header::offset_to_block(const void* ptr, std::size_t blk_size){
-    //possibly could remove ptr and use block->to_void_ptr instead.
+    
     return TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
 }
 
@@ -250,10 +259,8 @@ void block_header::mark_as_used(){
     this->set_used();
 }
 
-
-
 block_header* block_header::get_next(){
-        block_header* next = this->offset_to_block(this->to_void_ptr(), this->get_size()-BLOCK_START_OFFSET);
+        block_header* next = this->offset_to_block(this->to_void_ptr(), this->get_size()-BLOCK_HEADER_OVERHEAD);
         assert(!this->is_last());
         return next;
     }

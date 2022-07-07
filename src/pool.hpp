@@ -4,11 +4,13 @@
 #include <cassert>
 #include <memory_resource>
 
-
-
 namespace tlsf {
 
-
+struct pool_options {
+    std::size_t size;
+    void* (*allocator)(std::size_t);
+    void (*deallocator)(void*);
+};
 
 /**
  * @brief Memory pool that allocates following the TLSF algorithm, and contains 
@@ -24,10 +26,13 @@ class tlsf_pool {
 
         explicit tlsf_pool(std::size_t bytes){ this->initialize(bytes); }
         explicit tlsf_pool() { this->initialize(DEFAULT_POOL_SIZE); }
-        explicit tlsf_pool(std::size_t bytes, std::pmr::memory_resource* upstream)  {
+        explicit tlsf_pool(std::size_t bytes, std::pmr::memory_resource* upstream) {
+            
             this->initialize(bytes);
         }
-
+        
+        explicit tlsf_pool(pool_options options) : malloc_func(options.allocator), free_func(options.deallocator) 
+            {this->initialize(options.size); }
 
         ~tlsf_pool();
 
@@ -72,7 +77,6 @@ class tlsf_pool {
         
         void remove_free_block(detail::block_header* block, int fl, int sl);
         void insert_free_block(detail::block_header* block, int fl, int sl);        
-        detail::block_header* search_suitable_block(int* fli, int* sli);
 
         void block_remove(detail::block_header* block);
         void block_insert(detail::block_header* block);
@@ -80,14 +84,19 @@ class tlsf_pool {
         void trim_free(detail::block_header* block, std::size_t size);
         void trim_used(detail::block_header* block, std::size_t size);
 
+        detail::block_header* search_suitable_block(int* fli, int* sli);
         detail::block_header* trim_free_leading(detail::block_header* block, std::size_t size);
         detail::block_header* merge_prev(detail::block_header* block);
         detail::block_header* merge_next(detail::block_header* block);
         detail::block_header* locate_free(std::size_t size);
         void* prepare_used(detail::block_header* block, std::size_t size);
 
-        char* memory_pool;
+        char* memory_pool = nullptr;
         std::size_t pool_size; //in bytes
+        
+        //allocation function pointers
+        void* (*malloc_func)(std::size_t) = malloc;
+        void (*free_func)(void*) = free;
 };
 
 } //namespace tlsf

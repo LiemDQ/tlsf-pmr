@@ -3,13 +3,14 @@
 namespace tlsf {
 
 void* tlsf_resource::do_allocate(std::size_t bytes, std::size_t align) {
-    //TODO: look into whether the second argument (alignment) matters at all
-    //block allocation has its own alignment size, and the requested alignment does not matter.
     void* ptr;
-    if (align){
-        ptr = this->memory_pool.memalign_pool(bytes, align);
-    } else {
+
+    //if align is smaller than block alignment, any allocation 
+    //will already be aligned with the desired alignment. 
+    if (align <= detail::ALIGN_SIZE){
         ptr = this->memory_pool.malloc_pool(bytes);
+    } else {
+        ptr = this->memory_pool.memalign_pool(align, bytes);
     }
 
     //if nullptr is returned, allocation has failed. Defer to upstream resource. 
@@ -50,10 +51,7 @@ bool tlsf_resource::do_is_equal(const tlsf_resource& other) const noexcept {
 bool tlsf_resource::do_is_equal(const std::pmr::memory_resource& other) const noexcept {
     #ifdef __GXX_RTTI
         const auto cast = dynamic_cast<const tlsf_resource*>(&other);
-        if (cast){
-            return this->memory_pool == cast->memory_pool;
-        } else 
-            return false;
+        return cast ? this->memory_pool == cast->memory_pool : false;
     #else
         return false;
     #endif

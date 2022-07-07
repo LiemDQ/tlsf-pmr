@@ -18,9 +18,9 @@ class tlsf_resource : public std::pmr::memory_resource {
         explicit tlsf_resource(std::size_t size) : memory_pool(size) {}
         explicit tlsf_resource() noexcept: memory_pool() {}
         explicit tlsf_resource(std::size_t size, std::pmr::memory_resource* upstream): memory_pool(size), upstream(upstream) {}
+        explicit tlsf_resource(pool_options options): memory_pool(options) {}
         
         explicit tlsf_resource(const tlsf_resource& resource) noexcept: memory_pool(resource.memory_pool) {}
-        
         inline std::pmr::memory_resource* upstream_resource() const { return this->upstream; }
 
     private:
