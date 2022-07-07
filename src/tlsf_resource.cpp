@@ -5,7 +5,7 @@ namespace tlsf {
 void* tlsf_resource::do_allocate(std::size_t bytes, std::size_t align) {
     //TODO: look into whether the second argument (alignment) matters at all
     //block allocation has its own alignment size, and the requested alignment does not matter.
-    void* ptr = this->memory_pool.malloc(bytes);
+    void* ptr = this->memory_pool.malloc_pool(bytes);
 
     //if nullptr is returned, allocation has failed. Defer to upstream resource. 
     if (ptr == nullptr && bytes > 0) {
@@ -17,7 +17,7 @@ void* tlsf_resource::do_allocate(std::size_t bytes, std::size_t align) {
 void tlsf_resource::do_deallocate(void* p, std::size_t bytes, std::size_t align ){
     //The size to be deallocated is already known in the block, so the byte count and 
     //alignment values are not needed.
-    if (!this->memory_pool.free(p)){
+    if (!this->memory_pool.free_pool(p)){
         this->upstream->deallocate(p, bytes, align);
     }
 }

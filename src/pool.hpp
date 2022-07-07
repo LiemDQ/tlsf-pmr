@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cassert>
 #include <memory_resource>
-#include <utility>
 
 #if INTPTR_MAX == INT64_MAX
 #define TLSF_64BIT
@@ -12,9 +11,6 @@
 #else
 #error Unsupported bitness architecture for TLSF allocator.
 #endif
-
-//TODO: move this into .cpp file (will need to move block header implementation as well)
-
 
 namespace tlsf {
 
@@ -44,9 +40,9 @@ class tlsf_pool {
 
         ~tlsf_pool();
 
-        void* malloc(std::size_t size);
-        bool free(void* ptr);
-        void* realloc(void* ptr, std::size_t size);
+        void* malloc_pool(std::size_t size);
+        bool free_pool(void* ptr);
+        void* realloc_pool(void* ptr, std::size_t size);
       
         inline bool is_allocated() const { return this->memory_pool != nullptr; }
         inline bool operator==(const tlsf_pool& other) const {
@@ -64,8 +60,8 @@ class tlsf_pool {
              */
         struct block_header {
             block_header* prev_phys_block;
+
             std::size_t size;
-            
             block_header* next_free;
             block_header* prev_free;
 
@@ -74,24 +70,26 @@ class tlsf_pool {
              * The two least significant bits of the size field are used to store the block status
              *  bit 0: whether the block is busy or free
              *  bit 1: whether the previous block is busy or free
-             * 
+             */
+            static constexpr std::size_t block_header_free_bit = 1 << 0;
+            static constexpr std::size_t block_header_prev_free_bit = 1 << 1;
+
+            /**
              * Block overhead: 
              * The only overhead exposed during usage is the size field. The previous_hys_block field is technically stored 
              * inside the previous block.
              */
-            static constexpr std::size_t block_header_free_bit = 1 << 0;
-            static constexpr std::size_t block_header_prev_free_bit = 1 << 1;
             static constexpr std::size_t block_header_overhead = sizeof(std::size_t);
 
             inline std::size_t get_size() const { 
                 //must filter out last two bits
-                return this->size & ~(this->block_header_free_bit | this->block_header_prev_free_bit);
+                return this->size & ~(block_header_free_bit | block_header_prev_free_bit);
             }
 
             inline void set_size(std::size_t new_size){
                 const std::size_t old_size = this->size;
                 //must retain the last two bits regardless of the new size
-                this->size = new_size | (old_size & (this->block_header_free_bit | this->block_header_prev_free_bit));
+                this->size = new_size | (old_size & (block_header_free_bit | block_header_prev_free_bit));
             };
 
             bool is_last() const;
@@ -127,7 +125,7 @@ class tlsf_pool {
             
             void set_free() {this->size |= this->block_header_free_bit; }
             void set_used() {this->size &= ~this->block_header_free_bit; }
-            void set_prev_free() { this->size |= this->block_header_free_bit; }
+            void set_prev_free() { this->size |= this->block_header_prev_free_bit; }
             void set_prev_used() { this->size &= ~this->block_header_prev_free_bit; }
         /* User data starts after the size field in a used block */
         };
@@ -153,7 +151,7 @@ class tlsf_pool {
         /**
          * Allocations of sizes up to (1 << fl_index_max) are supported.
          * Because we linearly subdivide the second-level lists and the minimum size block
-         * is N bytes, it doesn't make sense ot create first-level lists for sizes smaller than
+         * is N bytes, it doesn't make sense to create first-level lists for sizes smaller than
          * sl_index_count * N or (1 << (sl_index_count_log2 + log(N))) bytes, as we will be trying to split size ranges 
          * into more slots than we have available. 
          * We calculate the minimum threshold size, and place all blocks below that size into the 0th first-level list. 
@@ -186,7 +184,7 @@ class tlsf_pool {
         static constexpr std::size_t align_up(std::size_t x, std::size_t align);
         static constexpr std::size_t align_down(std::size_t x, std::size_t align);
         static void* align_ptr(const void* ptr, std::size_t align);
-        char* create_memory_pool(std::size_t bytes, char* pool);
+        char* create_memory_pool(char* pool, std::size_t bytes);
 
         
         //TODO:
@@ -200,7 +198,6 @@ class tlsf_pool {
          * Based on the implementation described in this paper:
          * http://www.gii.upv.es/tlsf/files/spe_2008.pdf
          */
-
         static void mapping_search(std::size_t size, int* fli, int* sli);
         static void mapping_insert(std::size_t size, int* fli, int* sli);
         

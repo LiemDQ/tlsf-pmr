@@ -1,15 +1,13 @@
 #include "pool.hpp"
 #include <stdexcept>
-#include <utility>
 #include <cstddef>
-#include <cstdlib>
 #include <cstdint>
 #include <climits>
 #include <cassert>
 #include <cstring>
 #include <memory_resource>
 
-
+// More ergonomic cast
 #define TLSF_CAST(t, exp) ((t)(exp))
 
 namespace tlsf {
@@ -97,8 +95,8 @@ static_assert(sizeof(size_t) * CHAR_BIT <= 64);
 using tlsfptr_t = std::ptrdiff_t; 
 
 inline bool tlsf_pool::block_header::is_last() const { return this->get_size() == 0;}
-inline bool tlsf_pool::block_header::is_free() const { return TLSF_CAST(int, this->size & this->block_header_free_bit);}
-inline bool tlsf_pool::block_header::is_prev_free() const { return TLSF_CAST(int, this->size & this->block_header_prev_free_bit);}
+inline bool tlsf_pool::block_header::is_free() const { return TLSF_CAST(bool, this->size & this->block_header_free_bit);}
+inline bool tlsf_pool::block_header::is_prev_free() const { return TLSF_CAST(bool, this->size & this->block_header_prev_free_bit);}
 
 void* tlsf_pool::block_header::to_void_ptr() const {
     return TLSF_CAST(void*, TLSF_CAST(unsigned char*, this) + block_start_offset);
@@ -111,7 +109,7 @@ tlsf_pool::block_header* tlsf_pool::block_header::from_void_ptr(const void* ptr)
 
 /*Returns a block pointer offset from the passed ptr by the size given*/
 tlsf_pool::block_header* tlsf_pool::block_header::offset_to_block(const void* ptr, std::size_t blk_size){
-    //possiblyt could remove ptr and use block->to_void_ptr instead.
+    //possibly could remove ptr and use block->to_void_ptr instead.
     return TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
 }
 
@@ -119,6 +117,7 @@ tlsf_pool::~tlsf_pool(){
     //NOTE: make sure the tlsf pool outlives any objects whose memory 
     //is allocated by it! Otherwise this will result in dangling pointers.
     if (this->memory_pool){
+        //TODO: enable freeing using some other function handle.
         free((void*)(this->memory_pool));
         memory_pool = nullptr;
     }
@@ -126,27 +125,36 @@ tlsf_pool::~tlsf_pool(){
 
 void tlsf_pool::initialize(std::size_t size){
     this->pool_size = size;
-    this->block_null = block_header();
+    //TODO: currently this allocator uses malloc to allocate memory for the pool, 
+    //but we should use some kind of function pointer or template instead to use other means of memory allocation.
     this->memory_pool = (char*) malloc(size);
-
-    this->block_null.next_free = &this->block_null;
-    this->block_null.prev_free = &this->block_null;
+    
+    //Create a reference null block. 
+    //Pointing to this block will indicate that this block pointer is not assigned.
+    block_null = block_header();
+    block_null.next_free = &block_null;
+    block_null.prev_free = &block_null;
 
     this->fl_bitmap = 0;
+
+    //fill blockmap with block_null pointers. 
     for (int i = 0; i < this->fl_index_count; ++i){
         this->sl_bitmap[i] = 0;
         for (int j = 0; j < this->sl_index_count; ++j){
+
             this->blocks[i][j] = &block_null;
         }
     }
+
+     this->create_memory_pool(this->memory_pool + block_header::block_header_overhead, size-block_header::block_header_overhead);
 }
 
-char* tlsf_pool::create_memory_pool(std::size_t bytes, char* pool){
+char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
     block_header* block;
     block_header* next;
 
-    const std::size_t pool_bytes = align_down(bytes-this->pool_overhead, this->align_size);
-    if (((ptrdiff_t)pool & this->align_size) != 0){
+    const std::size_t pool_bytes = align_down(bytes, this->align_size);
+    if (((ptrdiff_t)mem % this->align_size) != 0){
         //memory size is not aligned
         printf("tlsf init pool: Memory size must be aligned by %u bytes.\n", (unsigned int)align_size);
         return nullptr;
@@ -169,21 +177,28 @@ char* tlsf_pool::create_memory_pool(std::size_t bytes, char* pool){
     // so that the prev_phys_free_block field falls outside of the pool - 
     // it will never be used.
 
-    block = block_header::offset_to_block((void*)pool,-(tlsfptr_t)block_header::block_header_overhead);
+    block = block_header::offset_to_block((void*)mem,-(tlsfptr_t)block_header::block_header_overhead);
     block->set_size(pool_bytes);
     block->set_free();
     block->set_prev_used();
     block_insert(block);
 
+    // split the block to create a 0-size sentinel block.
     next = block->link_next();
     next->set_size(0);
     next->set_used();
     next->set_prev_free();
 
-    return pool;    
+    return mem;    
 }
 
-/* Rounds up to the next block size for allocations */
+/**
+ * @brief Rounds up to the next block size for allocations
+ * 
+ * @param size 
+ * @param fli 
+ * @param sli 
+ */
 void tlsf_pool::mapping_search(std::size_t size, int* fli, int* sli){
     if (size >= small_block_size){
         const std::size_t round = (1 << (tlsf_fls_sizet(size)-sl_index_count_log2))-1;
@@ -192,7 +207,13 @@ void tlsf_pool::mapping_search(std::size_t size, int* fli, int* sli){
     mapping_insert(size, fli, sli);
 }
 
-/* mapping insert: computes first level index (fl) and second level index (sl)*/
+/**
+ * @brief Computes first level index (fl) and second level index (sl)
+ * 
+ * @param size 
+ * @param fli 
+ * @param sli 
+ */
 void tlsf_pool::mapping_insert(std::size_t size, int* fli, int* sli){
     int fl, sl;
     if (size < small_block_size){
@@ -208,7 +229,13 @@ void tlsf_pool::mapping_insert(std::size_t size, int* fli, int* sli){
     *sli = sl;
 }
 
-/* adjusts request size to ensure block is aligned with align. */
+/**
+ * @brief Adjusts request size to ensure block is aligned with align.
+ * 
+ * @param size the requested size of the block.
+ * @param align 
+ * @return std::size_t 
+ */
 std::size_t tlsf_pool::adjust_request_size(std::size_t size, std::size_t align){
     std::size_t adjust = 0;
     if (size){
@@ -220,7 +247,14 @@ std::size_t tlsf_pool::adjust_request_size(std::size_t size, std::size_t align){
     return adjust;
 }
 
-/*Removes a block from the free-list and updates the bitmaps.*/
+/**
+ * @brief Remove a block from the free-list and update the bitmaps.
+ * 
+ * 
+ * @param block 
+ * @param fl first index
+ * @param sl second index
+ */
 void tlsf_pool::remove_free_block(block_header* block, int fl, int sl){
     block_header* prev = block->prev_free;
     block_header* next = block->next_free;
@@ -245,7 +279,13 @@ void tlsf_pool::remove_free_block(block_header* block, int fl, int sl){
     }
 }
 
-/* Given the fl and sl indices, adds a block to the free-list and updates the bitmaps. */
+/**
+ * @brief Given the fl and sl indices, adds a block to the free-list and updates the bitmaps.
+ * 
+ * @param block 
+ * @param fl 
+ * @param sl 
+ */
 void tlsf_pool::insert_free_block(block_header* block, int fl, int sl){
     block_header* current = this->blocks[fl][sl];
     assert(current && "free list cannot have a null entry");
@@ -263,14 +303,17 @@ void tlsf_pool::insert_free_block(block_header* block, int fl, int sl){
     sl_bitmap[fl] |= (1U << sl);
 }
 
-/* finds the block closest in size given a fl and sl index*/
+/** @brief Finds the block closest in size given a fl and sl index
+ * 
+ * @param fli 
+ * @param sli 
+ * @return tlsf_pool::block_header* 
+ */
 tlsf_pool::block_header* tlsf_pool::search_suitable_block(int* fli, int* sli){
     int fl = *fli;
     int sl = *sli;
 
-    /**
-     * Search for a block in the list associated with the given fl/sl index
-     */
+    // Search for a block in the list associated with the given fl/sl index
     unsigned int sl_map = this->sl_bitmap[fl] & (~0U << sl);
     if (!sl_map) {
         // check if there is a block located in the right index, or higher
@@ -293,22 +336,24 @@ tlsf_pool::block_header* tlsf_pool::search_suitable_block(int* fli, int* sli){
 }
 
 /**
- * removes a block from the free-list.
- * Free-list location is calculated from the bitmaps and the block size.
+ * @brief Removes a block from the free-list. Free-list location is calculated from the bitmaps and the block size.
+ * 
+ * @param block Pointer to block to be removed
  */
 void tlsf_pool::block_remove(block_header* block){
     int fl, sl;
-    this->mapping_insert(block->get_size(), &fl, &sl);
-    this->remove_free_block(block, fl, sl);
+    tlsf_pool::mapping_insert(block->get_size(), &fl, &sl);
+    tlsf_pool::remove_free_block(block, fl, sl);
 }
 
 /**
- * Inserts a block into the free-list.
- * Free-list location is calculated from the bitmaps and the block size.
+ * @brief Inserts a block into the free-list. Free-list location is calculated from the bitmaps and the block size.
+ * 
+ * @param block 
  */
 void tlsf_pool::block_insert(block_header* block){
     int fl, sl;
-    this->mapping_insert(block->get_size(), &fl, &sl);
+    tlsf_pool::mapping_insert(block->get_size(), &fl, &sl);
     this->insert_free_block(block, fl, sl);
 }
 
@@ -334,7 +379,12 @@ tlsf_pool::block_header* tlsf_pool::block_split(block_header* block, std::size_t
     return remaining;
 }
 
-/* Trims off any trailing block space over size, and returns it to the pool.*/
+/**
+ * @brief Trims off any trailing block space over size, and returns it to the pool.
+ * 
+ * @param block 
+ * @param size 
+ */
 void tlsf_pool::trim_free(block_header* block, std::size_t size){
     assert(block->is_free() && "block must be free");
     if (this->block_can_split(block, size)) {
@@ -345,7 +395,12 @@ void tlsf_pool::trim_free(block_header* block, std::size_t size){
     }
 }
 
-/*Trims trailing block space off the end of a used block, returns it to the pool*/
+/**
+ * @brief Trims trailing block space off the end of a used block, returns it to the pool
+ * 
+ * @param block 
+ * @param size 
+ */
 void tlsf_pool::trim_used(block_header* block, std::size_t size){
     assert(!block->is_free() && "block must be used.");
     if (this->block_can_split(block, size)) {
@@ -355,6 +410,7 @@ void tlsf_pool::trim_used(block_header* block, std::size_t size){
         this->block_insert(remaining_block);
     }    
 }
+
 
 tlsf_pool::block_header* tlsf_pool::trim_free_leading(block_header* block, std::size_t size){
     block_header* remaining_block = block;
@@ -369,6 +425,13 @@ tlsf_pool::block_header* tlsf_pool::trim_free_leading(block_header* block, std::
     return remaining_block;
 }
 
+/**
+ * @brief Combines two adjacent blocks into a single block.
+ * 
+ * @param prev The first memory block to be joined.
+ * @param block The block to be merged with the previous block, immediately following it
+ * @return tlsf_pool::block_header* A pointer to the header of the new combined block.
+ */
 tlsf_pool::block_header* tlsf_pool::block_coalesce(block_header* prev, block_header* block){
     assert(!prev->is_last() && "previous block can't be last");
     // leaves flags untouched
@@ -377,17 +440,31 @@ tlsf_pool::block_header* tlsf_pool::block_coalesce(block_header* prev, block_hea
     return prev;
 }
 
+/**
+ * @brief Combine the block with the block before it, if it is free. 
+ * 
+ * @param block The block to be merged with its neighbor.
+ * @return tlsf_pool::block_header*: A pointer to the header of the new combined block. If the coalescing fails,
+ * returns a pointer to the original block.
+ */
 tlsf_pool::block_header* tlsf_pool::merge_prev(block_header* block){
     if (block->is_prev_free()){
         block_header* prev = block->prev_phys_block;
         assert(prev && "prev physical block cannot be null");
-        assert(prev->is_free() && "prev block is not free even thoguh marked as such.");
+        assert(prev->is_free() && "prev block is not free even though marked as such.");
         this->block_remove(prev);
         block = this->block_coalesce(prev, block);
     }
     return block;
 }
 
+/**
+ * @brief Combine the block with the block after it, if it is free. 
+ * 
+ * @param block The block to be merged with its neighbor.
+ * @return tlsf_pool::block_header*: A pointer to the header of the new combined block. If the coalescing fails, 
+ * returns a pointer to the original block.
+ */
 tlsf_pool::block_header* tlsf_pool::merge_next(block_header* block){
     block_header* next = block->get_next();
     assert(next && "next physical block cannot be null.");
@@ -399,19 +476,37 @@ tlsf_pool::block_header* tlsf_pool::merge_next(block_header* block){
     return block;
 }
 
-/* rounds up to power of two size */
+/**
+ * @brief rounds up to power of two size 
+ * 
+ * @param x 
+ * @param align 
+ * @return constexpr std::size_t 
+ */
 constexpr std::size_t tlsf_pool::align_up(std::size_t x, std::size_t align){
     assert(0 == (align & (align-1)) && "must align to a power of two");
     return (x + (align -1)) & ~(align -1);
 }
 
-/* rounds down to power of two size */
+/**
+ * @brief Rounds down to power of two size 
+ * 
+ * @param x 
+ * @param align 
+ * @return constexpr std::size_t 
+ */
 constexpr std::size_t tlsf_pool::align_down(std::size_t x, std::size_t align){
     assert(0 == (align & (align -1)) && "must align to a power of two");
     return x + (x & (align -1));
 }
 
-/* aligns pointer to machine word */
+/**
+ * @brief Aligns pointer to machine word
+ * 
+ * @param ptr 
+ * @param align 
+ * @return void* 
+ */
 void* tlsf_pool::align_ptr(const void* ptr, std::size_t align){
     const tlsfptr_t aligned = 
         (TLSF_CAST(tlsfptr_t, ptr) + (align -1)) & ~(align-1);
@@ -419,7 +514,12 @@ void* tlsf_pool::align_ptr(const void* ptr, std::size_t align){
     return TLSF_CAST(void*, aligned);
 }
 
-/* Locates a free block in the pool, and if successful, removes it from the free-list.*/
+/**
+ * @brief /* adjusts request size to ensure block is aligned with align.
+ * 
+ * @param size 
+ * @return tlsf_pool::block_header* 
+ */
 tlsf_pool::block_header* tlsf_pool::locate_free(std::size_t size){
     int fl = 0, sl = 0;
     block_header* block = nullptr;
@@ -436,7 +536,13 @@ tlsf_pool::block_header* tlsf_pool::locate_free(std::size_t size){
     return block;
 }
 
-/*Marks the block as used, trims excess space from it and returns a ptr to the block.*/
+/**
+ * @brief Marks the block as used, trims excess space from it and returns a ptr to the block.
+ * 
+ * @param block The block to be marked
+ * @param size The size of the 
+ * @return void* A pointer to the block if valid, nullptr otherwise. 
+ */
 void* tlsf_pool::prepare_used(block_header* block, std::size_t size){
     void* p = nullptr;
     if (block){
@@ -448,19 +554,31 @@ void* tlsf_pool::prepare_used(block_header* block, std::size_t size){
     return p;
 }
 
-void* tlsf_pool::malloc(std::size_t size){
+/**
+ * @brief Allocate continguous memory from the pool. This pointer must be returned to the pool to be freed up to avoid a memory leak.
+ * 
+ * @param size The amount of memory requested, in bytes.
+ * @return void* A pointer to the allocated memory. Returns nullptr if memory could not be allocated. 
+ */
+void* tlsf_pool::malloc_pool(std::size_t size){
     const std::size_t adjust = this->adjust_request_size(size, this->align_size);
     block_header* block = this->locate_free(size);
 
     return this->prepare_used(block, adjust);
 }
 
-
-bool tlsf_pool::free(void* ptr){
+/**
+ * @brief free: Deallocates memory at ptr. 
+ * 
+ * @param ptr 
+ * @return true if the memory was successfully deallocated.
+ * @return false if the memory is not part of the pool.
+ */
+bool tlsf_pool::free_pool(void* ptr){
     if(ptr){
         block_header* block = block_header::from_void_ptr(ptr);
         //need to ensure that the memory address is part of the memory pool
-        //otherwise defer deallocation to the upstream memory resource
+        //otherwise pool is not responsible for deallocating this ptr
         if (TLSF_CAST(char*, block) > this->memory_pool + this->pool_size 
             || TLSF_CAST(char*, block) < this->memory_pool )
                 return false;
@@ -475,15 +593,22 @@ bool tlsf_pool::free(void* ptr){
     return false;
 }
 
-void* tlsf_pool::realloc(void* ptr, std::size_t size){
+/**
+ * @brief Reallocates the memory block to one of size bytes.
+ * 
+ * @param ptr 
+ * @param size 
+ * @return void* Pointer to the reallocated memory block.
+ */
+void* tlsf_pool::realloc_pool(void* ptr, std::size_t size){
     void* p = nullptr;
     //zero-size requests are treated as freeing the block.
     if(ptr && size == 0){
-        this->free(ptr);
+        this->free_pool(ptr);
     }
     // nullptrs are treated as malloc
     else if (!ptr){
-        p = this->malloc(size);
+        p = this->malloc_pool(size);
     }
     else {
         block_header* block = block->from_void_ptr(ptr);
@@ -500,11 +625,11 @@ void* tlsf_pool::realloc(void* ptr, std::size_t size){
          * offer enough space, we must reallocate and copy.
          */
         if (adjust > cursize && (!next->is_free() || adjust > combined)) {
-            p = this->malloc(size);
+            p = this->malloc_pool(size);
             if (p) {
                 const size_t minsize = tlsf_min(cursize, size);
                 memcpy(p, ptr, minsize);
-                this->free(ptr);
+                this->free_pool(ptr);
             }
         }
         else {
