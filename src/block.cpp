@@ -14,12 +14,12 @@ namespace detail {
 #if defined(__GNUC__) && (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4)) \
     && defined(__GNUC_PATCHLEVEL__)
 
-inline int tlsf_ffs(unsigned int word){
+int tlsf_ffs(unsigned int word){
     return __builtin_ffs(word)-1;
 }
 
 
-inline int tlsf_fls(unsigned int word){
+int tlsf_fls(unsigned int word){
     const int bit = word ? 32 - __builtin_clz(word) : 0;
     return bit-1;
 }
@@ -39,11 +39,11 @@ static inline int tlsf_fls_generic(unsigned int word){
     return bit;
 }
 
-static inline int tlsf_ffs(unsigned int word){
+int tlsf_ffs(unsigned int word){
     return tlsf_fls_generic(word & (~word +1)) -1;
 }
 
-static inline int tlsf_fls(unsigned int word){
+int tlsf_fls(unsigned int word){
     return tlsf_fls_generic(word)-1;
 }
 
@@ -78,7 +78,7 @@ int tlsf_fls_sizet(size_t size){
  * @param align 
  * @return constexpr std::size_t 
  */
-constexpr std::size_t align_up(std::size_t x, std::size_t align){
+std::size_t align_up(std::size_t x, std::size_t align){
     assert(0 == (align & (align-1)) && "must align to a power of two");
     return (x + (align -1)) & ~(align -1);
 }
@@ -90,7 +90,7 @@ constexpr std::size_t align_up(std::size_t x, std::size_t align){
  * @param align 
  * @return constexpr std::size_t 
  */
-constexpr std::size_t align_down(std::size_t x, std::size_t align){
+std::size_t align_down(std::size_t x, std::size_t align){
     assert(0 == (align & (align -1)) && "must align to a power of two");
     return x + (x & (align -1));
 }
@@ -207,9 +207,9 @@ block_header* block_coalesce(block_header* prev, block_header* block){
  */
 
 
-inline bool block_header::is_last() const { return this->get_size() == 0;}
-inline bool block_header::is_free() const { return TLSF_CAST(bool, this->size & BLOCK_HEADER_FREE_BIT);}
-inline bool block_header::is_prev_free() const { return TLSF_CAST(bool, this->size & BLOCK_HEADER_PREV_FREE_BIT);}
+bool block_header::is_last() const { return this->get_size() == 0;}
+bool block_header::is_free() const { return TLSF_CAST(bool, this->size & BLOCK_HEADER_FREE_BIT);}
+bool block_header::is_prev_free() const { return TLSF_CAST(bool, this->size & BLOCK_HEADER_PREV_FREE_BIT);}
 
 /**
  * @brief Obtain a pointer to the raw memory inside the block, skipping past the block header.
@@ -236,6 +236,32 @@ block_header* block_header::from_void_ptr(const void* ptr){
 block_header* block_header::offset_to_block(const void* ptr, std::size_t blk_size){
     //possibly could remove ptr and use block->to_void_ptr instead.
     return TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
+}
+
+void block_header::mark_as_free() {
+    block_header* next = this->link_next();
+    next->set_prev_free();
+    this->set_free();
+}
+
+void block_header::mark_as_used(){
+    block_header* next = this->get_next();
+    next->set_prev_used();
+    this->set_used();
+}
+
+
+
+block_header* block_header::get_next(){
+        block_header* next = this->offset_to_block(this->to_void_ptr(), this->get_size()-BLOCK_START_OFFSET);
+        assert(!this->is_last());
+        return next;
+    }
+
+block_header* block_header::link_next(){
+    block_header* next = this->get_next();
+    next->prev_phys_block = this;
+    return next;
 }
 
 }
