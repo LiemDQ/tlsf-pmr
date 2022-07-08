@@ -18,14 +18,19 @@ enable_testing()
 add_executable(
     tlsf_test
     test_tlsf_resource.cpp
+    test_block.cpp
     test_pool.cpp
-)
+    )
+
 
 target_link_libraries(
     tlsf_test
     tlsf_resource
     gtest_main
-)
+    )
 
+# message(STATUS "Enabling sanitizers for tlsf_test")
+target_compile_options(tlsf_test INTERFACE -g -fsanitize=memory)
+        
 include(GoogleTest)
 gtest_discover_tests(tlsf_test)
