@@ -11,6 +11,7 @@ add_library(
     STATIC 
     src/tlsf_resource.cpp
     src/pool.cpp
+    src/block.cpp
     )
 
 target_compile_features(tlsf_resource PUBLIC cxx_std_17)
