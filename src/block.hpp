@@ -141,7 +141,7 @@ struct block_header {
     bool can_split(std::size_t size) const;
     void* to_void_ptr() const;
     static block_header* from_void_ptr(const void* ptr);
-    static block_header* offset_to_block(const void* ptr, std::size_t blk_size);    
+    static block_header* offset_to_block(const void* ptr, tlsfptr_t blk_size);    
 
     block_header* get_next();
     block_header* link_next();

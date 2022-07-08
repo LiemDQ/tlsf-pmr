@@ -1,6 +1,7 @@
 #include "block.hpp"
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 
 namespace tlsf {
 namespace detail {
@@ -242,9 +243,10 @@ block_header* block_header::from_void_ptr(const void* ptr){
  * @param blk_size 
  * @return block_header* 
  */
-block_header* block_header::offset_to_block(const void* ptr, std::size_t blk_size){
-    
-    return TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
+block_header* block_header::offset_to_block(const void* ptr, tlsfptr_t blk_size){
+    auto result = TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
+    fprintf(stderr, "Address of header: %p\n", result);
+    return result;
 }
 
 void block_header::mark_as_free() {

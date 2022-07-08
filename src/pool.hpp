@@ -56,8 +56,8 @@ class tlsf_pool {
         
         using tlsfptr_t = ptrdiff_t;
        
-        static constexpr std::size_t pool_overhead = 2*detail::BLOCK_HEADER_OVERHEAD;
-        static constexpr std::size_t tlsf_alloc_overhead = detail::BLOCK_HEADER_OVERHEAD;
+        static constexpr std::size_t POOL_OVERHEAD = 2*detail::BLOCK_HEADER_OVERHEAD;
+        static constexpr std::size_t TLSF_ALLOC_OVERHEAD = detail::BLOCK_HEADER_OVERHEAD;
         
         const inline std::size_t tlsf_size(){
             return sizeof(*this);

@@ -30,7 +30,6 @@ tlsf_pool::~tlsf_pool(){
 }
 
 void tlsf_pool::initialize(std::size_t size){
-    this->pool_size = size;
     //TODO: currently this allocator uses malloc to allocate memory for the pool, 
     //but we should use some kind of function pointer or template instead to use other means of memory allocation.
     this->memory_pool = (char*) this->malloc_func(size);
@@ -59,7 +58,9 @@ char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
     block_header* block;
     block_header* next;
 
-    const std::size_t pool_bytes = align_down(bytes, ALIGN_SIZE);
+    const std::size_t pool_bytes = align_down(bytes - POOL_OVERHEAD, ALIGN_SIZE);
+    this->pool_size = pool_bytes;
+
     if (((ptrdiff_t)mem % ALIGN_SIZE) != 0){
         //memory size is not aligned
         printf("tlsf init pool: Memory size must be aligned by %u bytes.\n", (unsigned int)ALIGN_SIZE);
@@ -69,12 +70,12 @@ char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
     if (pool_bytes < BLOCK_SIZE_MIN || pool_bytes > BLOCK_SIZE_MAX){
 #ifdef TLSF_64BIT
             printf("Init pool: Memory size must be between 0x%x and 0x%x00 bytes.\n",
-                (unsigned int)(pool_overhead+BLOCK_SIZE_MIN),
-                (unsigned int)(pool_overhead+BLOCK_SIZE_MAX));
+                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MIN),
+                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MAX));
 #else
             printf("Init pool: Memory size must be between %u and %u bytes.\n",
-                (unsigned int)(pool_overhead+BLOCK_SIZE_MIN),
-                (unsigned int)(pool_overhead+BLOCK_SIZE_MAX));
+                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MIN),
+                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MAX));
 #endif
         return nullptr;
     }
@@ -83,7 +84,7 @@ char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
     // so that the prev_phys_free_block field falls outside of the pool - 
     // it will never be used.
 
-    block = block_header::offset_to_block((void*)mem,(tlsfptr_t)BLOCK_HEADER_OVERHEAD);
+    block = block_header::offset_to_block((void*)mem,-(ptrdiff_t)BLOCK_HEADER_OVERHEAD);
     block->set_size(pool_bytes);
     block->set_free();
     block->set_prev_used();
