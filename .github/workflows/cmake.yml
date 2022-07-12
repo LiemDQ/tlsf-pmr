@@ -82,6 +82,7 @@ jobs:
             -S . \
             -B build \
             -DCMAKE_BUILD_TYPE=${{matrix.config.build_type}} \
+            -DENABLE_TESTING=true \
             -G "${{ matrix.config.generators}}" \
       - name: Build tests
         shell: bash
