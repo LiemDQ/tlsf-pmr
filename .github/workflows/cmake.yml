@@ -23,7 +23,7 @@ jobs:
             cxx: "cl",
             environment_script: "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
             archiver: "7z a",
-            generators: "Visual Studio Enterprise 2022"
+            generators: "Visual Studio 17 2022"
           }
         - {
             name: "Windows Latest MinGW",
@@ -88,4 +88,4 @@ jobs:
         run: cd build && cmake --build .
       - name: Run tests
         shell: bash
-        run: ctest . --output-on-failure
+        run: cd build && ctest . --output-on-failure
