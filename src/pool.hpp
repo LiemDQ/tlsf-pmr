@@ -37,7 +37,7 @@ class tlsf_pool {
         void* memalign_pool(std::size_t align, std::size_t size);
 
         
-        inline std::pmr::memory_resource* upstream_resource() const {  return this->upstream; }
+        inline std::pmr::memory_resource* pool_resource() const {  return this->upstream; }
         inline bool is_allocated() const { return this->memory_pool != nullptr; }
         inline bool operator==(const tlsf_pool& other) const {
             return this->memory_pool == other.memory_pool && this->memory_pool != nullptr;
