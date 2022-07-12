@@ -6,18 +6,29 @@
 
 using TVal = int;
 
-void* print_malloc(std::size_t size) {
-    void* result = malloc(size);
-    fprintf(stderr, "Allocated %u bytes at memory location %p\n", size, result);
-    return result;
-}
+// utility memory resource for debugging purposes
+class print_resource : public std::pmr::memory_resource {
+    private:
+        void* do_allocate(std::size_t bytes, std::size_t ) override {
+            void* result = malloc(bytes);
+            fprintf(stderr, "Allocated %u bytes at memory location %p\n", bytes, result);
+            return result;
+            
+        }
+        void do_deallocate(void* p, std::size_t , std::size_t ) override {
+            fprintf(stderr, "Freeing memory at address %p\n", p);
+            free(p);
+        }
 
-void print_free(void* ptr){
-    fprintf(stderr, "Freeing memory at address %p\n", ptr);
-    free(ptr);
-}
+        bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+            return false;
+        }
+};
+
+print_resource print_res;
+
  
-tlsf::pool_options options {5000*sizeof(TVal), print_malloc, print_free};
+tlsf::pool_options options {5000*sizeof(TVal), &print_res};
 
 class TLSFVectorTests: public ::testing::Test {
     protected:

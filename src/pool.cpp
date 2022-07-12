@@ -23,8 +23,7 @@ tlsf_pool::~tlsf_pool(){
     //NOTE: make sure the tlsf pool outlives any objects whose memory 
     //is allocated by it! Otherwise this will result in dangling pointers.
     if (this->memory_pool){
-        //TODO: enable freeing using some other function handle.
-        this->free_func((void*)(this->memory_pool));
+        this->upstream->deallocate((void*)(this->memory_pool), this->allocated_size, ALIGN_SIZE);
         this->memory_pool = nullptr;
     }
 }
@@ -32,8 +31,8 @@ tlsf_pool::~tlsf_pool(){
 void tlsf_pool::initialize(std::size_t size){
     //TODO: currently this allocator uses malloc to allocate memory for the pool, 
     //but we should use some kind of function pointer or template instead to use other means of memory allocation.
-    this->memory_pool = (char*) this->malloc_func(size);
-    
+    this->memory_pool = (char*) this->upstream->allocate(size, ALIGN_SIZE);
+    this->allocated_size = size;
     //Create a reference null block. 
     //Pointing to this block will indicate that this block pointer is not assigned.
     block_null = block_header();

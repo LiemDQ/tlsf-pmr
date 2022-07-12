@@ -8,8 +8,7 @@ namespace tlsf {
 
 struct pool_options {
     std::size_t size;
-    void* (*allocator)(std::size_t);
-    void (*deallocator)(void*);
+    std::pmr::memory_resource* upstream_resource;
 };
 
 /**
@@ -26,12 +25,7 @@ class tlsf_pool {
 
         explicit tlsf_pool(std::size_t bytes){ this->initialize(bytes); }
         explicit tlsf_pool() { this->initialize(DEFAULT_POOL_SIZE); }
-        explicit tlsf_pool(std::size_t bytes, std::pmr::memory_resource* upstream) {
-            
-            this->initialize(bytes);
-        }
-        
-        explicit tlsf_pool(pool_options options) : malloc_func(options.allocator), free_func(options.deallocator) 
+        explicit tlsf_pool(pool_options options) : upstream(options.upstream_resource) 
             {this->initialize(options.size); }
 
         ~tlsf_pool();
@@ -40,13 +34,10 @@ class tlsf_pool {
         bool free_pool(void* ptr);
         void* realloc_pool(void* ptr, std::size_t size);
          
-        //TODO:
-        // Implement memalign and placement new functionality for this memory resource.
-        // What does it mean to have placement new and alignment when the block partitioning 
-        // is done by the underlying implementation anyway? Can we overwrite the same block?
         void* memalign_pool(std::size_t align, std::size_t size);
+
         
-      
+        inline std::pmr::memory_resource* upstream_resource() const {  return this->upstream; }
         inline bool is_allocated() const { return this->memory_pool != nullptr; }
         inline bool operator==(const tlsf_pool& other) const {
             return this->memory_pool == other.memory_pool && this->memory_pool != nullptr;
@@ -93,10 +84,10 @@ class tlsf_pool {
 
         char* memory_pool = nullptr;
         std::size_t pool_size; //in bytes
+        std::size_t allocated_size;
         
         //allocation function pointers
-        void* (*malloc_func)(std::size_t) = malloc;
-        void (*free_func)(void*) = free;
+        std::pmr::memory_resource* upstream = std::pmr::new_delete_resource();
 };
 
 } //namespace tlsf
