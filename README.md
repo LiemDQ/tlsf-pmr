@@ -5,7 +5,7 @@ tlsf-pmr is a memory resource for use with [`polymorphic_allocator`](https://en.
 The original implementation was implemented in C with a GPL license. This project is based off of a clean-room implementation by [mattconte](https://github.com/mattconte/tlsf) and adapted to use C++ best practices and enable a cleaner API. It has no external dependencies aside from the standard library, so incorporating it into your project should be very straightforward.
 
 ## Requirements
-- C++17 compiler and standard library. In practice your choice is either libstdc++ 9.0+ or MSVC STL 19.13+ as libc++ still does not support `polymorphic_memory_resource`. See [this page](https://en.cppreference.com/w/cpp/compiler_support) for details.
+- C++17 compiler and standard library. In practice your choice is either libstdc++ 9.0+ or MSVC STL 19.13+ as libc++ still does not support `polymorphic_memory_resource`. See [this page](https://en.cppreference.com/w/cpp/compiler_support) for details. This means that you will not be able to use this on MacOS unless you find a way to link to libstdc++ instead of libc++.
 - 32-bit or 64-bit architecture.
 
 ## Usage
