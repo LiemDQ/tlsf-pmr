@@ -48,7 +48,6 @@ TEST(PoolDeathTest, poolDeallocatesOnDestruction){
     {
         tlsf_pool pool(1024*1024);
     }
-    EXPECT_TRUE(false);
 }
 
 

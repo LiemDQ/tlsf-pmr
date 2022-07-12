@@ -32,12 +32,15 @@ tlsf::pool_options options {5000*sizeof(TVal), &print_res};
 
 class TLSFVectorTests: public ::testing::Test {
     protected:
-    TLSFVectorTests() : resource(options) {
+    TLSFVectorTests() 
+    : resource(options, std::pmr::null_memory_resource())
+    , allocator(&resource) {
         std::pmr::polymorphic_allocator<TVal> alloc(&resource);
         vec = std::pmr::vector<TVal>(alloc);
     }
     tlsf::tlsf_resource resource;
     std::pmr::vector<TVal> vec;
+    std::pmr::polymorphic_allocator<TVal> allocator;
 };
 
 TEST(TLSFResourceTests, deallocatesOnDestruction) {
@@ -60,7 +63,10 @@ TEST_F(TLSFVectorTests, vectorAllocation){
     ASSERT_EQ(vec.size(), 2500);
 }
 
-TEST_F(TLSFVectorTests, outOfMemory){
-    EXPECT_THROW(resource.allocate(6000*sizeof(TVal), 4), std::bad_alloc);
-    // EXPECT_THROW(vec.reserve(5000000), std::bad_alloc);
+TEST_F(TLSFVectorTests, resourceOutOfMemory){
+    EXPECT_THROW(resource.allocate(6000*sizeof(TVal), 4), std::bad_alloc);   
+}
+
+TEST_F(TLSFVectorTests, allocatorOutOfMemory){
+    EXPECT_THROW(allocator.allocate(6000*sizeof(TVal)), std::bad_alloc);
 }
