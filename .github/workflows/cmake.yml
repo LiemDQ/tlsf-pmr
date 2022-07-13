@@ -1,4 +1,4 @@
-name: CMake Build and Test
+name: Unit tests
 
 on:
   push:
