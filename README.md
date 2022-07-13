@@ -1,4 +1,5 @@
 # tlsf-pmr
+![CI test status](https://github.com/LiemDQ/tlsf-pmr/actions/workflows/cmake.yml/badge.svg)
 
 tlsf-pmr is a memory resource for use with [`polymorphic_allocator`](https://en.cppreference.com/w/cpp/memory/polymorphic_allocator) that uses the Two-Level Segregated Fit algorithm as an allocation scheme. This algorithm is able to allocate memory in $O(1)$ time, and is thus suitable in contexts where dynamic memory allocation with deterministic latency is needed, e.g. real-time operating systems or audio applications.
 
