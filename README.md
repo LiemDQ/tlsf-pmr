@@ -6,8 +6,8 @@ tlsf-pmr is a memory resource for use with [`polymorphic_allocator`](https://en.
 The original implementation was implemented in C with a GPL license. This project is based off of a clean-room implementation by [mattconte](https://github.com/mattconte/tlsf) and adapted to use C++ best practices and enable a cleaner API. It has no external dependencies aside from the standard library, so incorporating it into your project should be very straightforward.
 
 ## Requirements
-- C++17 compiler and standard library. In practice your choice is either libstdc++ 9.0+ or MSVC STL 19.13+ as libc++ still does not support `polymorphic_memory_resource`. See [this page](https://en.cppreference.com/w/cpp/compiler_support) for details. This means that you will not be able to use this on MacOS unless you find a way to link to libstdc++ instead of libc++.
-- 32-bit or 64-bit architecture.
+- C++17 compiler and standard library. As of 2024, you can use all 3 major standard library implementations (libstdc++ 9.0+, libc++ 16+ or MSVC STL 19.13+). See [this page](https://en.cppreference.com/w/cpp/compiler_support/17) for details. 
+- 32-bit or 64-bit architecture. 16-bit is not supported at this time but may be added in the future. 
 
 ## Usage
 tlsf-pmr can be used with any container that accepts the standard library memory allocator API when combined with `std::polymorphic_allocator`. This includes standard library containers such as `std::vector`. Note that there is memory overhead from the memory block headers. Each block header requires 32 bytes of memory. 
@@ -77,7 +77,9 @@ tlsf_resource resource(options); //use monotonic_buffer_resource to allocate poo
 Note that deterministic latency $\neq$ good performance! In fact, these two qualities are often (but not always) to the detriment of each other. Instrument and test your code before drawing conclusions, and make decisions on your allocation scheme based on your specific combination of hardware, operational requirements and test results!
 
 ## Thread safety
-The TLSF allocator was not originally designed for multithreaded applications, and `tlsf_resource` is not thread-safe. Instead, `synchronized_tlsf_resource` should be used. It has a very similar implementation, but uses a naive lock during allocation and deallocation, and as such it is very simple at the cost of potential performance from more finely-grained locking strategies. 
+The TLSF allocator was not originally designed for multithreaded applications, and `tlsf_resource` is not thread-safe. Instead, `synchronized_tlsf_resource` should be used. The API is the same as the standard `tlsf_resource`. It has a very similar implementation, but uses a naive lock during allocation and deallocation, and as such it is very simple at the cost of potential performance from more finely-grained locking strategies. 
+
+Keep in mind that any kind of mutual exclusion will undermine the execution determinancy provided by the TLSF allocation scheme. In practice, the extent to which this matters depends on your specific application and requirements. It may be advisable to instead use a separate `tlsf_resource` for each thread, while ensuring the upstream resource (if any) is thread-safe.
 
 ## Memory exhaustion
 As this is a pool-based memory resource, the amount of memory available is fixed and determined upon initialization. When the pool is exhausted, the memory resource defers to a secondary memory resource to satisfy further allocations. The default resource is `std::pmr::null_memory_resource`, which simply throws `std::bad_alloc` if an allocation is attempted. In other words, if the pool is exhausted the default behavior is to throw a failure to allocate exception upon further allocation attempts. This behavior can be changed by simply providing another memory resource during allocation. 
@@ -93,3 +95,7 @@ target_link_libraries(
     ...
 )
 ```
+
+# Contact
+
+Any questions or suggestions can be submitted as a Github issue. However, I only check Github sporadically, so there may be a lengthy delay before you receive a response. Alternatively, you send me an email at dq@liem.ca.
