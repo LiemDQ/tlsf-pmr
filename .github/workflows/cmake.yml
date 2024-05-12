@@ -4,6 +4,10 @@ on:
   push:
     branches: 
       - main
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - 'LICENSE2'
   pull_request:
 
 jobs:
@@ -66,7 +70,7 @@ jobs:
             generators: "Ninja"
           }
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Print env
         run: |
           echo github.event.action: ${{ github.event.action }}
