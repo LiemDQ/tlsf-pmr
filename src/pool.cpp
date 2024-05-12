@@ -20,8 +20,6 @@ using tlsfptr_t = std::ptrdiff_t;
 
 
 tlsf_pool::~tlsf_pool(){
-    //NOTE: make sure the tlsf pool outlives any objects whose memory 
-    //is allocated by it! Otherwise this will result in dangling pointers.
     if (this->memory_pool){
         this->upstream->deallocate((void*)(this->memory_pool), this->allocated_size, ALIGN_SIZE);
         this->memory_pool = nullptr;
@@ -230,8 +228,8 @@ void tlsf_pool::trim_free(block_header* block, std::size_t size){
 /**
  * @brief Trims trailing block space off the end of a used block, returns it to the pool
  * 
- * @param block 
- * @param size 
+ * @param block block to be trimmed.
+ * @param size amount of memory to be trimmed
  */
 void tlsf_pool::trim_used(block_header* block, std::size_t size){
     assert(!block->is_free() && "block must be used.");
@@ -243,7 +241,13 @@ void tlsf_pool::trim_used(block_header* block, std::size_t size){
     }    
 }
 
-
+/**
+ * @brief Trims leading block space off the beginning of a used block, returns it to the pool.
+ * 
+ * @param block block to be trimmed
+ * @param size amount of memory to be trimmed
+ * @return Pointer to (nonempty) block after trimming.
+*/
 block_header* tlsf_pool::trim_free_leading(block_header* block, std::size_t size){
     block_header* remaining_block = block;
     if (block->can_split(size)){
@@ -261,7 +265,7 @@ block_header* tlsf_pool::trim_free_leading(block_header* block, std::size_t size
  * @brief Combine the block with the block before it, if it is free. 
  * 
  * @param block The block to be merged with its neighbor.
- * @return tlsf_pool::block_header*: A pointer to the header of the new combined block. If the coalescing fails,
+ * @return A pointer to the header of the new combined block. If the coalescing fails,
  * returns a pointer to the original block.
  */
 block_header* tlsf_pool::merge_prev(block_header* block){
@@ -279,7 +283,7 @@ block_header* tlsf_pool::merge_prev(block_header* block){
  * @brief Combine the block with the block after it, if it is free. 
  * 
  * @param block The block to be merged with its neighbor.
- * @return tlsf_pool::block_header*: A pointer to the header of the new combined block. If the coalescing fails, 
+ * @return A pointer to the header of the new combined block. If the coalescing fails, 
  * returns a pointer to the original block.
  */
 block_header* tlsf_pool::merge_next(block_header* block){
@@ -298,7 +302,7 @@ block_header* tlsf_pool::merge_next(block_header* block){
  * @brief Find a block in the block free-list that has the desired size, in bytes.
  * 
  * @param size 
- * @return tlsf_pool::block_header* A pointer to a block of memory of the requested size. 
+ * @return A pointer to a block of memory of the requested size. 
  * If no such block could be found, returns nullptr.
  */
 block_header* tlsf_pool::locate_free(std::size_t size){
@@ -322,7 +326,7 @@ block_header* tlsf_pool::locate_free(std::size_t size){
  * 
  * @param block The block to be marked
  * @param size The size of the block
- * @return void* A pointer to the block if valid, nullptr otherwise. 
+ * @return A pointer to the block if valid, nullptr otherwise. 
  */
 void* tlsf_pool::prepare_used(block_header* block, std::size_t size){
     void* p = nullptr;
@@ -339,7 +343,7 @@ void* tlsf_pool::prepare_used(block_header* block, std::size_t size){
  * @brief Allocate continguous memory from the pool. This pointer must be returned to the pool to be freed up to avoid a memory leak.
  * 
  * @param size The amount of memory requested, in bytes.
- * @return void* A pointer to the allocated memory. Returns nullptr if memory could not be allocated. 
+ * @return A pointer to the allocated memory. Returns nullptr if memory could not be allocated. 
  */
 void* tlsf_pool::malloc_pool(std::size_t size){
     const std::size_t adjust = adjust_request_size(size, ALIGN_SIZE);
@@ -385,7 +389,7 @@ bool tlsf_pool::free_pool(void* ptr){
  * 
  * @param ptr 
  * @param size 
- * @return void* Pointer to the reallocated memory block.
+ * @return Pointer to the reallocated memory block.
  */
 void* tlsf_pool::realloc_pool(void* ptr, std::size_t size){
     void* p = nullptr;

@@ -169,9 +169,9 @@ std::size_t adjust_request_size(std::size_t size, std::size_t align){
 /**
  * @brief Split off a block of size bytes from another block. 
  * 
- * @param block 
- * @param size 
- * @return block_header* The new block formed from the split-off memory.
+ * @param block block to be split 
+ * @param size size of the original block after splitting.
+ * @return block_header* The new (empty) block formed from the split-off memory.
  */
 block_header* block_split(block_header* block, std::size_t size){
     block_header* remaining = block_header::offset_to_block(block->to_void_ptr(), size-BLOCK_HEADER_OVERHEAD);

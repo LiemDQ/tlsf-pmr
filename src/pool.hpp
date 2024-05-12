@@ -16,6 +16,8 @@ struct pool_options {
  * all the internal implementation details. Unless you are implementing your own memory resource 
  * or need the lower-level control, you should use `tlsf_resource` or 
  * `synchronized_tlsf_resource` instead. 
+ * 
+ * @warning Make sure the pool outlives any objects whose memory is allocated by it! Failure to do so will result in dangling pointers.
  */
 class tlsf_pool {
 

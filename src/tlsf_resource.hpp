@@ -6,9 +6,9 @@
 namespace tlsf {
 
 /**
- * @brief Two-level segregated fit memory allocator and memory resource. 
+ * @brief Two-level segregated fit memory allocator and memory resource, using the `std::pmr` API. 
  * 
- * 
+ * @warning This is a stateful resource and it must outlive any objects whose memory is allocated by it! Failure to do so will result in dangling pointers.
  * 
  */
 class tlsf_resource : public std::pmr::memory_resource {
