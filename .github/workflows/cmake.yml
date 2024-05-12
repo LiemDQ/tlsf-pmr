@@ -55,17 +55,16 @@ jobs:
             archiver: "7z a",
             generators: "Ninja"
           }
-        # not supported on macOS
-        # - {
-        #     name: "macOS Latest Clang",
-        #     os: macos-latest,
-        #     artifact: "macos_clang.7z",
-        #     build_type: "Release",
-        #     cc: "clang",
-        #     cxx: "clang++",
-        #     archiver: "7za a",
-        #     generators: "Ninja"
-        #   }
+        - {
+            name: "macOS Latest Clang",
+            os: macos-latest,
+            artifact: "macos_clang.7z",
+            build_type: "Release",
+            cc: "clang",
+            cxx: "clang++",
+            archiver: "7za a",
+            generators: "Ninja"
+          }
     steps:
       - uses: actions/checkout@v2
       - name: Print env
