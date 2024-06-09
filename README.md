@@ -74,7 +74,7 @@ tlsf_resource resource(options); //use monotonic_buffer_resource to allocate poo
 ```
 
 ## Disclaimer on performance
-Note that deterministic latency $\neq$ good performance! In fact, these two qualities are often (but not always) to the detriment of each other. Instrument and test your code before drawing conclusions, and make decisions on your allocation scheme based on your specific combination of hardware, operational requirements and test results!
+Note that deterministic latency $\neq$ good performance! In fact, these two qualities are often (but not always) to the detriment of each other. Instrument and test your code before drawing conclusions, and make decisions on your allocation scheme based on your specific combination of hardware, operational requirements and test results. Make sure you actually need deterministic latency—in my experience, situations that truly require it are quite rare.  
 
 ## Thread safety
 The TLSF allocator was not originally designed for multithreaded applications, and `tlsf_resource` is not thread-safe. Instead, `synchronized_tlsf_resource` should be used. The API is the same as the standard `tlsf_resource`. It has a very similar implementation, but uses a naive lock during allocation and deallocation, and as such it is very simple at the cost of potential performance from more finely-grained locking strategies. 
@@ -98,4 +98,4 @@ target_link_libraries(
 
 # Contact
 
-Any questions or suggestions can be submitted as a Github issue. However, I only check Github sporadically, so there may be a lengthy delay before you receive a response. Alternatively, you send me an email at dq@liem.ca.
+Any questions or suggestions can be submitted as a Github issue. However, I only check Github sporadically, so there may be a lengthy delay before you receive a response. Alternatively, you can email me at dq@liem.ca.
