@@ -242,7 +242,7 @@ void const* block_header::to_void_ptr() const {
  */
 block_header* block_header::from_void_ptr(const void* ptr){
     //note the intermediate conversion to unsigned char ptr is to get 1-byte arithmetic.
-    const uint8_t* byte_ptr = reinterpret_cast<const uint8_t*>(ptr);
+    const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
     return reinterpret_cast<block_header*>(const_cast<uint8_t*>(byte_ptr) - BLOCK_START_OFFSET);
     // return TLSF_CAST(block_header*, TLSF_CAST(unsigned char*, ptr) - BLOCK_START_OFFSET);
 }
@@ -257,7 +257,7 @@ block_header* block_header::from_void_ptr(const void* ptr){
  * @return block_header* 
  */
 block_header* block_header::offset_to_block(const void* ptr, tlsfptr_t blk_size){
-    const uint8_t* byte_ptr = reinterpret_cast<const uint8_t*>(ptr);
+    const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
     const uint8_t* new_address = byte_ptr + blk_size;
 
     return reinterpret_cast<block_header*>(const_cast<uint8_t*>(new_address));

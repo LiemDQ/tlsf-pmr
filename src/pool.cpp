@@ -7,9 +7,6 @@
 #include <iostream>
 #include <memory_resource>
 
-// More ergonomic cast
-#define TLSF_CAST(t, exp) ((t)(exp))
-
 namespace tlsf {
 using namespace detail;
 
@@ -30,7 +27,7 @@ tlsf_pool::~tlsf_pool(){
 void tlsf_pool::initialize(std::size_t size){
     //TODO: currently this allocator uses malloc to allocate memory for the pool, 
     //but we should use some kind of function pointer or template instead to use other means of memory allocation.
-    this->memory_pool = (char*) this->upstream->allocate(size, ALIGN_SIZE);
+    this->memory_pool = static_cast<char*>(this->upstream->allocate(size, ALIGN_SIZE));
     this->allocated_size = size;
     //Create a reference null block. 
     //Pointing to this block will indicate that this block pointer is not assigned.
@@ -59,7 +56,7 @@ char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
     const std::size_t pool_bytes = align_down(bytes - POOL_OVERHEAD, ALIGN_SIZE);
     this->pool_size = pool_bytes;
 
-    if (((ptrdiff_t)mem % ALIGN_SIZE) != 0){
+    if ((reinterpret_cast<ptrdiff_t>(mem) % ALIGN_SIZE) != 0){
         //memory size is not aligned
         // fprintf(stderr,"tlsf init pool: Memory size must be aligned by %u bytes.\n", (unsigned int)ALIGN_SIZE);
         std::cerr << "tlsf init pool: Memory size must be aligned by " << static_cast<unsigned int>(ALIGN_SIZE) << " bytes.\n";
@@ -81,7 +78,7 @@ char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
     // so that the prev_phys_free_block field falls outside of the pool - 
     // it will never be used.
 
-    block = block_header::offset_to_block((void*)mem,-(ptrdiff_t)BLOCK_HEADER_OVERHEAD);
+    block = block_header::offset_to_block(static_cast<void*>(mem),-static_cast<ptrdiff_t>(BLOCK_HEADER_OVERHEAD));
     block->set_size(pool_bytes);
     block->set_free();
     block->set_prev_used();
@@ -364,8 +361,8 @@ bool tlsf_pool::free_pool(void* ptr){
         block_header* block = block_header::from_void_ptr(ptr);
         //need to ensure that the memory address is part of the memory pool
         //otherwise pool is not responsible for deallocating this ptr
-        if (TLSF_CAST(char*, block) > this->memory_pool + this->pool_size 
-            || TLSF_CAST(char*, block) < this->memory_pool )
+        if (reinterpret_cast<char*>(block) > this->memory_pool + this->pool_size 
+            || reinterpret_cast<char*>(block) < this->memory_pool )
                 return false;
         
         assert(!block->is_free() && "block already marked as free");
@@ -464,18 +461,18 @@ void* tlsf_pool::memalign_pool(std::size_t align, std::size_t size){
     if (block) {
         void* ptr = block->to_void_ptr();
         void* aligned = align_ptr(ptr, align);
-        size_t gap = TLSF_CAST(size_t, TLSF_CAST(tlsfptr_t, aligned)- TLSF_CAST(tlsfptr_t, ptr));
+        size_t gap = static_cast<size_t>(reinterpret_cast<tlsfptr_t>(aligned)- reinterpret_cast<tlsfptr_t>(ptr));
 
         // if gap size is too small, offset to next aligned boundary
         if (gap && gap < gap_minimum){
             const size_t gap_remain = gap_minimum - gap;
             const size_t offset = tlsf_max(gap_remain, align);
-            const void* next_aligned = TLSF_CAST(void*, 
-                TLSF_CAST(tlsfptr_t, aligned) + offset);
+            const void* next_aligned = reinterpret_cast<void*>(
+                reinterpret_cast<tlsfptr_t>(aligned) + offset);
             
             aligned = align_ptr(next_aligned, align);
-            gap = TLSF_CAST(size_t, 
-                TLSF_CAST(tlsfptr_t, aligned) -TLSF_CAST(tlsfptr_t, ptr));
+            gap = static_cast<size_t>( 
+                reinterpret_cast<tlsfptr_t>(aligned) -reinterpret_cast<tlsfptr_t>(ptr));
         }
 
         if (gap) {
