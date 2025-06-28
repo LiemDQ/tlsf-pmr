@@ -23,19 +23,21 @@ class tlsf_pool {
 
     public:
         static constexpr std::size_t DEFAULT_POOL_SIZE = 1024*1024;
-
-
+        
         explicit tlsf_pool(std::size_t bytes){ this->initialize(bytes); }
         explicit tlsf_pool() { this->initialize(DEFAULT_POOL_SIZE); }
         explicit tlsf_pool(pool_options options) : upstream(options.upstream_resource) 
             {this->initialize(options.size); }
+
+        //copy construction is disabled
+        tlsf_pool(const tlsf_pool&) = delete;
+        tlsf_pool& operator=(const tlsf_pool&) = delete;
 
         ~tlsf_pool();
 
         void* malloc_pool(std::size_t size);
         bool free_pool(void* ptr);
         void* realloc_pool(void* ptr, std::size_t size);
-         
         void* memalign_pool(std::size_t align, std::size_t size);
 
         

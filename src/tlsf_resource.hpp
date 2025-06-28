@@ -14,13 +14,16 @@ namespace tlsf {
 class tlsf_resource : public std::pmr::memory_resource {
 
     public:
-
+    //constructors
         explicit tlsf_resource(std::size_t size) : memory_pool(size) {}
         explicit tlsf_resource() noexcept: memory_pool() {}
         explicit tlsf_resource(std::size_t size, std::pmr::memory_resource* upstream): memory_pool(size), upstream(upstream) {}
         explicit tlsf_resource(pool_options options): memory_pool(options), upstream(options.upstream_resource) {}
         explicit tlsf_resource(pool_options options, std::pmr::memory_resource* upstream): memory_pool(options), upstream(upstream) {}
-        explicit tlsf_resource(const tlsf_resource& resource) noexcept: memory_pool(resource.memory_pool) {}
+    
+    //copy construction is disabled for consistency with standard library pool resources
+        tlsf_resource(const tlsf_resource&) = delete;
+        tlsf_resource& operator=(const tlsf_resource&) = delete;
 
         inline std::pmr::memory_resource* upstream_resource() const { return this->upstream; }
 
