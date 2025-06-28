@@ -139,7 +139,10 @@ struct block_header {
     bool is_free() const;
     bool is_prev_free() const;
     bool can_split(std::size_t size) const;
-    void* to_void_ptr() const;
+    
+    void* to_void_ptr();
+    void const* to_void_ptr() const;
+
     static block_header* from_void_ptr(const void* ptr);
     static block_header* offset_to_block(const void* ptr, tlsfptr_t blk_size);    
 
