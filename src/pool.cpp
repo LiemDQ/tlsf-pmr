@@ -4,6 +4,7 @@
 #include <climits>
 #include <cassert>
 #include <cstring>
+#include <iostream>
 #include <memory_resource>
 
 // More ergonomic cast
@@ -60,19 +61,18 @@ char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
 
     if (((ptrdiff_t)mem % ALIGN_SIZE) != 0){
         //memory size is not aligned
-        printf("tlsf init pool: Memory size must be aligned by %u bytes.\n", (unsigned int)ALIGN_SIZE);
+        // fprintf(stderr,"tlsf init pool: Memory size must be aligned by %u bytes.\n", (unsigned int)ALIGN_SIZE);
+        std::cerr << "tlsf init pool: Memory size must be aligned by " << static_cast<unsigned int>(ALIGN_SIZE) << " bytes.\n";
         return nullptr;
     }
 
     if (pool_bytes < BLOCK_SIZE_MIN || pool_bytes > BLOCK_SIZE_MAX){
 #ifdef TLSF_64BIT
-            printf("Init pool: Memory size must be between 0x%x and 0x%x00 bytes.\n",
-                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MIN),
-                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MAX));
+            std::cerr << "Init pool: Memory size must be between 0x" << static_cast<unsigned int>(POOL_OVERHEAD+BLOCK_SIZE_MIN) 
+                << " and 0x" << static_cast<unsigned int>(POOL_OVERHEAD+BLOCK_SIZE_MAX) << "00 bytes.\n";
 #else
-            printf("Init pool: Memory size must be between %u and %u bytes.\n",
-                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MIN),
-                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MAX));
+            std::cerr << "Init pool: Memory size must be between " << static_cast<unsigned int>(POOL_OVERHEAD+BLOCK_SIZE_MIN) 
+                << " and " << static_cast<unsigned int>(POOL_OVERHEAD+BLOCK_SIZE_MAX) << " bytes.\n";
 #endif
         return nullptr;
     }
