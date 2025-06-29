@@ -58,13 +58,13 @@ int tlsf_fls(unsigned int word){
 // }
 
 int tlsf_fls_sizet(size_t size){
-    int high = (int)(size >> 32);
+    int high = static_cast<int>(size >> 32);
     int bits = 0;
     if (high) {
         bits = 32 + tlsf_fls(high);
     } 
     else {
-        bits = tlsf_fls((int)size & 0xffffffff);
+        bits = tlsf_fls(static_cast<int>(size) & 0xffffffff);
     }
     return bits; 
 }
