@@ -6,9 +6,6 @@
 namespace tlsf {
 namespace detail {
 
-//More ergonomic cast
-//TODO: may want to change this to reinterpret_cast or static_cast depending on context. 
-#define TLSF_CAST(t, exp) ((t)(exp))
 
 /**
  * use builtin function to count leading zeroes of a bitmap.
@@ -61,13 +58,13 @@ int tlsf_fls(unsigned int word){
 // }
 
 int tlsf_fls_sizet(size_t size){
-    int high = (int)(size >> 32);
+    int high = static_cast<int>(size >> 32);
     int bits = 0;
     if (high) {
         bits = 32 + tlsf_fls(high);
     } 
     else {
-        bits = tlsf_fls((int)size & 0xffffffff);
+        bits = tlsf_fls(static_cast<int>(size) & 0xffffffff);
     }
     return bits; 
 }
@@ -125,11 +122,11 @@ void mapping_insert(std::size_t size, int* fli, int* sli){
     int fl, sl;
     if (size < SMALL_BLOCK_SIZE){
         fl = 0;
-        sl = TLSF_CAST(int, size) / (SMALL_BLOCK_SIZE/SL_INDEX_COUNT);
+        sl = static_cast<int>(size) / (SMALL_BLOCK_SIZE/SL_INDEX_COUNT);
     }
     else {
         fl = tlsf_fls_sizet(size);
-        sl = TLSF_CAST(int, size >> (fl-SL_INDEX_COUNT_LOG2))^(1 << SL_INDEX_COUNT_LOG2);
+        sl = static_cast<int>(size >> (fl-SL_INDEX_COUNT_LOG2))^(1 << SL_INDEX_COUNT_LOG2);
         fl -= (FL_INDEX_SHIFT-1);
     }
     *fli = fl;
@@ -144,10 +141,11 @@ void mapping_insert(std::size_t size, int* fli, int* sli){
  * @return void* 
  */
 void* align_ptr(const void* ptr, std::size_t align){
-    const tlsfptr_t aligned = 
-        (TLSF_CAST(tlsfptr_t, ptr) + (align -1)) & ~(align-1);
+    const uintptr_t ptr_val = reinterpret_cast<uintptr_t>(ptr);
+    const uintptr_t aligned_val  = (ptr_val + (align - 1)) & ~(align -1);
+
     assert(0 == (align & (align-1)) && "must align to a power of two");
-    return TLSF_CAST(void*, aligned);
+    return reinterpret_cast<void*>(aligned_val);
 }
 
 /**
@@ -213,16 +211,27 @@ block_header* block_coalesce(block_header* prev, block_header* block){
 
 
 bool block_header::is_last() const { return this->get_size() == 0;}
-bool block_header::is_free() const { return TLSF_CAST(bool, this->size & BLOCK_HEADER_FREE_BIT);}
-bool block_header::is_prev_free() const { return TLSF_CAST(bool, this->size & BLOCK_HEADER_PREV_FREE_BIT);}
+bool block_header::is_free() const { return static_cast<bool>(this->size & BLOCK_HEADER_FREE_BIT);}
+bool block_header::is_prev_free() const { return static_cast<bool>(this->size & BLOCK_HEADER_PREV_FREE_BIT);}
 bool block_header::can_split(std::size_t size) const { return this->get_size() >= sizeof(block_header) + size; }
 /**
  * @brief Obtain a pointer to the raw memory inside the block, skipping past the block header.
  * 
  * @return void* 
  */
-void* block_header::to_void_ptr() const {
-    return TLSF_CAST(void*, TLSF_CAST(uint8_t*, this) + BLOCK_START_OFFSET);
+void* block_header::to_void_ptr() {
+    uint8_t* offset_ptr = reinterpret_cast<uint8_t*>(this);
+    return offset_ptr + BLOCK_START_OFFSET;
+}
+
+/**
+ * @brief Obtain a pointer to the raw memory inside the block, skipping past the block header.
+ * 
+ * @return void* 
+ */
+void const* block_header::to_void_ptr() const {
+    uint8_t const* offset_ptr = reinterpret_cast<uint8_t const*>(this);
+    return offset_ptr + BLOCK_START_OFFSET;
 }
 
 /**
@@ -233,7 +242,9 @@ void* block_header::to_void_ptr() const {
  */
 block_header* block_header::from_void_ptr(const void* ptr){
     //note the intermediate conversion to unsigned char ptr is to get 1-byte arithmetic.
-    return TLSF_CAST(block_header*, TLSF_CAST(unsigned char*, ptr) - BLOCK_START_OFFSET);
+    const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
+    return reinterpret_cast<block_header*>(const_cast<uint8_t*>(byte_ptr) - BLOCK_START_OFFSET);
+    // return TLSF_CAST(block_header*, TLSF_CAST(unsigned char*, ptr) - BLOCK_START_OFFSET);
 }
 
 /**
@@ -246,9 +257,10 @@ block_header* block_header::from_void_ptr(const void* ptr){
  * @return block_header* 
  */
 block_header* block_header::offset_to_block(const void* ptr, tlsfptr_t blk_size){
-    auto result = TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
-    // fprintf(stderr, "Address of header: %p\n", result);
-    return result;
+    const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
+    const uint8_t* new_address = byte_ptr + blk_size;
+
+    return reinterpret_cast<block_header*>(const_cast<uint8_t*>(new_address));
 }
 
 void block_header::mark_as_free() {
