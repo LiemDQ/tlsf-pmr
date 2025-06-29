@@ -38,11 +38,13 @@ void tlsf_resource::release() {
     this->memory_pool.reset();
 }
 
-pool_options tlsf_resource::options() {
-    if (this->memory_pool)
-        return {this->memory_pool->allocation_size(), this->memory_pool->pool_resource()};
-    else 
-        return {0, nullptr};
+std::optional<pool_options> tlsf_resource::options() {
+    if (this->memory_pool) {
+        return pool_options{this->memory_pool->allocation_size(), this->memory_pool->pool_resource()};
+    }
+    else {
+        return std::nullopt;
+    }
 }
 
 void tlsf_resource::create_memory_pool(pool_options options, bool replace){

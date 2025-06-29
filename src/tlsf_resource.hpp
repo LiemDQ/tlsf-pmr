@@ -46,9 +46,15 @@ class tlsf_resource : public std::pmr::memory_resource {
         void release();
 
         /**
-         * @brief Returns pool options that determine the allocation behavior of this resource.
+         * @brief Returns pool options that determine the allocation behavior of this resource. Empty if
+         * no underlying memory pool has been allocated. 
          */
-        pool_options options();
+        std::optional<pool_options> options();
+        
+        /**
+         * @brief Returns whether the resource has an allocated memory pool or not.
+         */
+        inline bool has_pool() { return this->memory_pool.has_value();}
 
         /**
          * @brief Allocate a new memory pool for this memory resource using `options`. If `replace` is `True`, then
