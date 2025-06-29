@@ -1,6 +1,20 @@
 #include "tlsf_resource.hpp"
+#include <optional>
+#include <stdexcept>
 
 namespace tlsf {
+
+void tlsf_resource::initialize_memory_pool(std::size_t size, std::pmr::memory_resource* upstream) {
+    this->memory_pool = tlsf_pool::create(size, upstream);
+    
+    //throw bad_alloc if allocation has failed.
+    if (!this->memory_pool) {
+        throw std::runtime_error("Initialization of TLSF memory pool failed. Possible reasons:\n"
+            "(1): Internal allocated memory pointer is not aligned with minimum align size.\n"
+            "(2): Upstream memory resource used by pool failed to allocate.\n"
+            "(3): Requested pool size is incompatible with TLSF block size requirements.\n");
+    }
+}
 
 void* tlsf_resource::do_allocate(std::size_t bytes, std::size_t align) {
     void* ptr;
@@ -8,9 +22,9 @@ void* tlsf_resource::do_allocate(std::size_t bytes, std::size_t align) {
     //if align is smaller than block alignment, any allocation 
     //will already be aligned with the desired alignment. 
     if (align <= detail::ALIGN_SIZE){
-        ptr = this->memory_pool.malloc_pool(bytes);
+        ptr = this->memory_pool->malloc_pool(bytes);
     } else {
-        ptr = this->memory_pool.memalign_pool(align, bytes);
+        ptr = this->memory_pool->memalign_pool(align, bytes);
     }
 
     //if nullptr is returned, allocation has failed. Defer to upstream resource. 
@@ -20,10 +34,31 @@ void* tlsf_resource::do_allocate(std::size_t bytes, std::size_t align) {
     return ptr;
 }
 
+void tlsf_resource::release() {
+    this->memory_pool.reset();
+}
+
+pool_options tlsf_resource::options() {
+    if (this->memory_pool)
+        return {this->memory_pool->allocation_size(), this->memory_pool->pool_resource()};
+    else 
+        return {0, nullptr};
+}
+
+void tlsf_resource::create_memory_pool(pool_options options, bool replace){
+    if (!replace && this->memory_pool){
+        throw std::runtime_error("Attempted to allocate a TLSF memory pool with a pre-existing pool.");
+    } else {
+        //deallocate existing pool first, if applicable
+        this->release();
+        this->initialize_memory_pool(options.size, options.upstream_resource);
+    }
+}
+
 void tlsf_resource::do_deallocate(void* p, std::size_t bytes, std::size_t align ){
     //The size to be deallocated is already known in the block, so the byte count and 
     //alignment values are not needed.
-    if (!this->memory_pool.free_pool(p)){
+    if (!this->memory_pool->free_pool(p)){
         this->upstream->deallocate(p, bytes, align);
     }
 }
