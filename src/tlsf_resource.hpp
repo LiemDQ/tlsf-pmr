@@ -1,6 +1,6 @@
 #pragma once
 #include <memory_resource>
-#include <cstddef>
+#include <optional>
 #include "pool.hpp"
 
 namespace tlsf {
@@ -15,19 +15,62 @@ class tlsf_resource : public std::pmr::memory_resource {
 
     public:
     //constructors
-        explicit tlsf_resource(std::size_t size) : memory_pool(size) {}
-        explicit tlsf_resource() noexcept: memory_pool() {}
-        explicit tlsf_resource(std::size_t size, std::pmr::memory_resource* upstream): memory_pool(size), upstream(upstream) {}
-        explicit tlsf_resource(pool_options options): memory_pool(options), upstream(options.upstream_resource) {}
-        explicit tlsf_resource(pool_options options, std::pmr::memory_resource* upstream): memory_pool(options), upstream(upstream) {}
+        explicit tlsf_resource() noexcept {}
+        /**
+         * @brief Construct a TLSF memory resource.
+         * 
+         * @throws `std::runtime_error` if the memory pool is unable to initialize. 
+         */
+        explicit tlsf_resource(
+            std::size_t size, 
+            std::pmr::memory_resource* upstream = std::pmr::null_memory_resource())
+            : upstream(upstream) {this->initialize_memory_pool(size);}
+        
+        explicit tlsf_resource(
+            pool_options options, 
+            std::pmr::memory_resource* upstream = std::pmr::null_memory_resource())
+            : upstream(upstream) {this->initialize_memory_pool(options.size, options.upstream_resource);}
     
     //copy construction is disabled for consistency with standard library pool resources
         tlsf_resource(const tlsf_resource&) = delete;
         tlsf_resource& operator=(const tlsf_resource&) = delete;
 
         inline std::pmr::memory_resource* upstream_resource() const { return this->upstream; }
+        
+        /**
+         * @brief Releases all allocated memory owned by this resource.
+         * 
+         * @warning This will deallocate the underlying memory pool. If there are objects 
+         * with memory allocated by the pool still in scope, this will result in dangling pointers!
+         */
+        void release();
 
-    private:
+        /**
+         * @brief Returns pool options that determine the allocation behavior of this resource. Empty if
+         * no underlying memory pool has been allocated. 
+         */
+        std::optional<pool_options> options();
+        
+        /**
+         * @brief Returns whether the resource has an allocated memory pool or not.
+         */
+        inline bool has_pool() { return this->memory_pool.has_value();}
+
+        /**
+         * @brief Allocate a new memory pool for this memory resource using `options`. If `replace` is `True`, then
+         * any pre-existing memory pool for this resource is deallocated in the process.
+         * 
+         * @warning Deallocating a memory pool while objects allocated by it 
+         * are still in scope will result in dangling pointers!
+         * 
+         * @throws `std::runtime_error` if `replace` is `false` and there is a memory pool already allocated.
+         */
+        void create_memory_pool(pool_options options, bool replace = false);
+
+    protected:
+        void initialize_memory_pool(
+            std::size_t size, 
+            std::pmr::memory_resource* upstream = std::pmr::new_delete_resource());
 
         //overridden functions    
         void* do_allocate(std::size_t bytes, std::size_t alignment) override;
@@ -36,8 +79,9 @@ class tlsf_resource : public std::pmr::memory_resource {
         bool do_is_equal(const tlsf_resource& other) const noexcept;
         bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override;
 
-        tlsf_pool memory_pool;   
-        std::pmr::memory_resource* upstream = std::pmr::null_memory_resource();
+
+        std::optional<tlsf_pool> memory_pool;   
+        std::pmr::memory_resource* upstream;
 };
 
 } //namespace tlsf

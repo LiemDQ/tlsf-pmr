@@ -2,6 +2,7 @@
 
 #include <memory_resource>
 #include "pool.hpp"
+#include "tlsf_resource.hpp"
 #include <mutex>
 
 namespace tlsf {
@@ -21,33 +22,20 @@ namespace tlsf {
  * by the TLSF allocation scheme. The extent to which this matters in practice depends on your specific application and requirements. It may be advisable to instead use a separate
  * `tlsf_resource` for each thread, while ensuring the upstream resource (if any) is thread-safe.
  */
-class synchronized_tlsf_resource: public std::pmr::memory_resource {
-       public:
-    //constructors
-        explicit synchronized_tlsf_resource(std::size_t size) : memory_pool(size) {}
-        explicit synchronized_tlsf_resource() noexcept: memory_pool() {}
-        explicit synchronized_tlsf_resource(std::size_t size, std::pmr::memory_resource* upstream): memory_pool(size), upstream(upstream) {}
-        explicit synchronized_tlsf_resource(pool_options options): memory_pool(options), upstream(options.upstream_resource) {}
-        explicit synchronized_tlsf_resource(pool_options options, std::pmr::memory_resource* upstream): memory_pool(options), upstream(upstream) {}
+class synchronized_tlsf_resource: public tlsf_resource {
+    public:
 
     //copy construction is disabled for consistency with standard library pool resources
         synchronized_tlsf_resource(const synchronized_tlsf_resource&) = delete;
         synchronized_tlsf_resource& operator=(const synchronized_tlsf_resource&) = delete;
         
-        inline std::pmr::memory_resource* upstream_resource() const { return this->upstream; }
-
-    private:
+    protected:
 
         //overridden functions    
         void* do_allocate(std::size_t bytes, std::size_t alignment) override;
         void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override;
 
-        bool do_is_equal(const synchronized_tlsf_resource& other) const noexcept;
-        bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override;
-
-        tlsf_pool memory_pool;   
         std::mutex mutex;
-        std::pmr::memory_resource* upstream = std::pmr::null_memory_resource();
 
 };
 
