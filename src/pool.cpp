@@ -1,6 +1,5 @@
 #include "pool.hpp"
 #include <cstddef>
-#include <cstdint>
 #include <climits>
 #include <cassert>
 #include <cstring>
@@ -19,20 +18,77 @@ static_assert(sizeof(size_t) * CHAR_BIT <= 64);
 using tlsfptr_t = std::ptrdiff_t; 
 
 
+std::optional<tlsf_pool> tlsf_pool::create(std::size_t bytes, std::pmr::memory_resource* upstream) {
+    tlsf_pool pool(bytes, upstream);
+
+    //Constructor will set memory_pool to nullptr on failure.
+    //Check that initialization was successful.
+    if (!pool.is_allocated()) {
+        return std::nullopt;
+    }
+    //pool is move constructed inside optional object otherwise.
+    return pool; 
+}
+
+std::optional<tlsf_pool> tlsf_pool::create(pool_options options) {
+    return tlsf_pool::create(options.size, options.upstream_resource);
+}
+
+tlsf_pool::tlsf_pool(std::size_t bytes, std::pmr::memory_resource* upstream): upstream(upstream) {
+    this->initialize(bytes);
+}
+
+tlsf_pool::tlsf_pool(tlsf_pool&& other) noexcept: 
+    memory_pool(other.memory_pool), 
+    upstream(other.upstream), 
+    pool_size(other.pool_size),
+    allocated_size(other.allocated_size),
+    block_null(other.block_null),
+    fl_bitmap(other.fl_bitmap) 
+{
+    std::memcpy(sl_bitmap, other.sl_bitmap, sizeof(sl_bitmap));
+    std::memcpy(blocks, other.blocks, sizeof(blocks));
+
+    // IMPORTANT: nullify the moved-from object's pointer to prevent double-free
+    other.memory_pool = nullptr;
+    other.pool_size = 0;
+    other.allocated_size = 0;
+
+}
+
+tlsf_pool& tlsf_pool::operator=(tlsf_pool&& other) noexcept {
+    if (this != &other) {
+        if (this->memory_pool) {
+            this->upstream->deallocate(this->memory_pool, this->allocated_size, ALIGN_SIZE);
+        }
+        this->memory_pool = other.memory_pool;
+        this->upstream = other.upstream;
+        this->pool_size = other.pool_size;
+        this->allocated_size = other.allocated_size;
+        this->block_null = other.block_null;
+        this->fl_bitmap = other.fl_bitmap;
+        std::memcpy(sl_bitmap, other.sl_bitmap, sizeof(sl_bitmap));
+        std::memcpy(blocks, other.blocks, sizeof(blocks));
+
+        //IMPORTANT: nullify the moved-from object's pointer to prevent double-free
+        other.memory_pool = nullptr;
+        other.pool_size = 0;
+        other.allocated_size = 0;
+    }
+    return *this;
+}
+
 tlsf_pool::~tlsf_pool(){
     if (this->memory_pool){
-        this->upstream->deallocate((void*)(this->memory_pool), this->allocated_size, ALIGN_SIZE);
+        this->upstream->deallocate(static_cast<void*>(this->memory_pool), this->allocated_size, ALIGN_SIZE);
         this->memory_pool = nullptr;
     }
 }
 
-void tlsf_pool::initialize(std::size_t size){
-    //TODO: currently this allocator uses malloc to allocate memory for the pool, 
-    //but we should use some kind of function pointer or template instead to use other means of memory allocation.
-    this->memory_pool = (char*) this->upstream->allocate(size, ALIGN_SIZE);
-    this->allocated_size = size;
-    //Create a reference null block. 
-    //Pointing to this block will indicate that this block pointer is not assigned.
+void tlsf_pool::initialize(std::size_t bytes){
+    this->allocated_size = bytes;
+    void* allocated_mem = this->upstream->allocate(bytes, ALIGN_SIZE);
+
     block_null = block_header();
     block_null.next_free = &block_null;
     block_null.prev_free = &block_null;
@@ -43,12 +99,21 @@ void tlsf_pool::initialize(std::size_t size){
     for (int i = 0; i < FL_INDEX_COUNT; ++i){
         this->sl_bitmap[i] = 0;
         for (int j = 0; j < SL_INDEX_COUNT; ++j){
-
             this->blocks[i][j] = &block_null;
         }
     }
 
-     this->create_memory_pool(this->memory_pool + BLOCK_HEADER_OVERHEAD, size-BLOCK_HEADER_OVERHEAD);
+    //If initialization fails, a nullptr will be returned.
+    char* pool_start = this->create_memory_pool(
+        static_cast<char*>(allocated_mem) + BLOCK_HEADER_OVERHEAD,
+        this->allocated_size - BLOCK_HEADER_OVERHEAD
+    );
+
+    if (pool_start == nullptr) {
+        this->upstream->deallocate(allocated_mem, this->allocated_size, ALIGN_SIZE);
+    } else {
+        this->memory_pool = static_cast<char*>(allocated_mem);
+    }
 }
 
 char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
@@ -56,27 +121,18 @@ char* tlsf_pool::create_memory_pool(char* mem, std::size_t bytes){
     block_header* next;
 
     const std::size_t pool_bytes = align_down(bytes - POOL_OVERHEAD, ALIGN_SIZE);
-    this->pool_size = pool_bytes;
-
+    
     if (((ptrdiff_t)mem % ALIGN_SIZE) != 0){
         //memory size is not aligned
-        printf("tlsf init pool: Memory size must be aligned by %u bytes.\n", (unsigned int)ALIGN_SIZE);
         return nullptr;
     }
-
+    
     if (pool_bytes < BLOCK_SIZE_MIN || pool_bytes > BLOCK_SIZE_MAX){
-#ifdef TLSF_64BIT
-            printf("Init pool: Memory size must be between 0x%x and 0x%x00 bytes.\n",
-                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MIN),
-                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MAX));
-#else
-            printf("Init pool: Memory size must be between %u and %u bytes.\n",
-                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MIN),
-                (unsigned int)(POOL_OVERHEAD+BLOCK_SIZE_MAX));
-#endif
+        //pool bytes are out of range of block size requirements
         return nullptr;
     }
-
+    this->pool_size = pool_bytes;
+    
     // create the main free block. Offset the start of the block slightly
     // so that the prev_phys_free_block field falls outside of the pool - 
     // it will never be used.

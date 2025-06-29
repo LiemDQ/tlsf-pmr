@@ -6,6 +6,8 @@
 namespace tlsf {
 namespace detail {
 
+//More ergonomic cast
+//TODO: may want to change this to reinterpret_cast or static_cast depending on context. 
 #define TLSF_CAST(t, exp) ((t)(exp))
 
 /**
@@ -245,7 +247,7 @@ block_header* block_header::from_void_ptr(const void* ptr){
  */
 block_header* block_header::offset_to_block(const void* ptr, tlsfptr_t blk_size){
     auto result = TLSF_CAST(block_header*, TLSF_CAST(tlsfptr_t, ptr)+blk_size);
-    fprintf(stderr, "Address of header: %p\n", result);
+    // fprintf(stderr, "Address of header: %p\n", result);
     return result;
 }
 

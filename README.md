@@ -10,13 +10,14 @@ The original implementation was implemented in C with a GPL license. This projec
 - 32-bit or 64-bit architecture. 16-bit is not supported at this time but may be added in the future. 
 
 ## Usage
-tlsf-pmr can be used with any container that accepts the standard library memory allocator API when combined with `std::polymorphic_allocator`. This includes standard library containers such as `std::vector`. Note that there is memory overhead from the memory block headers. Each block header requires 32 bytes of memory. 
+The main class in tlsf-pmr is `tlsf_resource`, which has a API similar to that of [`std::pmr::unsynchronized_pool_resource`](https://en.cppreference.com/w/cpp/memory/unsynchronized_pool_resource.html). It can be used with any container that accepts the standard library memory allocator API when combined with `std::polymorphic_allocator`. This includes standard library containers such as `std::vector`. Note that there is memory overhead from the memory block headers. Each block header requires 32 bytes of memory. 
+
 
 ```cpp
 using namespace tlsf;
 {
     tlsf_resource resource(5000); //pool with 5000 bytes of memory
-    std::pmr::polymorphic_allocator<TVal> alloc(&resource);
+    std::pmr::polymorphic_allocator<int> alloc(&resource);
 
     //std::pmr::vector<T> is a type alias for std::vector<T, std::pmr::polymorphic_allocator<T>>
     std::pmr::vector<int> vec(alloc); //vector now uses the allocator
@@ -24,6 +25,23 @@ using namespace tlsf;
     vec.push_back(50);
 } //all memory is automatically deallocated when tlsf_resource exits the scope.
 ```
+
+
+> [!WARNING]
+> `tlsf_resource` uses RAII to manage its memory pool, and frees all underlying allocated memory when it exits the scope. This means it MUST outlive any objects allocated by it, or there will be dangling pointers when it is destructed. 
+
+```cpp
+
+std::pmr::vector<int> bad_unsafe_function() {
+    tlsf_resource resource(5000); 
+    std::pmr::polymorphic_allocator<int> alloc(&resource);
+
+    std::pmr::vector<int> vec(alloc);
+
+    return vec; //resource exits scope and frees memory -- attempting to use vec will result in use-after-free
+}
+```
+
 ### Constructor options
 The size of the pool and the upstream resource can be specified using `pool_options`. When the pool memory is exhausted or is unable to satisfy an allocation request, the allocator will fall back to the upstream resource to allocate memory, in a similar fashion as [`std::pmr::unsynchronized_pool_resource`](https://en.cppreference.com/w/cpp/memory/unsynchronized_pool_resource). 
 
@@ -41,7 +59,7 @@ pool_options options {
 tlsf_resource resource(options); //tlsf_resource will use new_delete_resource to allocate pool and as upstream resource
 ```
 
-If a memory resource is specified separately from the `pool_options`, then this memory resource will be used as the upstream resource instead. 
+If a memory resource is specified separately from the `pool_options`, then this memory resource will be used as the upstream resource for fallback allocation instead. The resource specified in `pool_options` will still be used to allocate the TLSF memory pool.
 
 ```cpp
 
@@ -53,12 +71,42 @@ pool_options options {
 tlsf_resource resource(options, std::pmr::null_memory_resource()); //will throw std::bad_alloc when memory pool is exhausted 
 ```
 
+### Creating new memory pools
+If `tlsf_resource` was not initialized with a memory pool, or a new pool needs to be created, `create_memory_pool` will allocate a new memory pool using `pool_options` and 
+optionally will also replace an underlying memory pool.
+
+
+by default, `create_memory_pool` throws a `std::runtime_error` if a pre-existing pool will be replaced. This can be disabled by setting the second argument to `true`.
+
+
+```cpp
+pool_options options2 {
+    10'000'000,
+    std::pmr::get_default_resource()
+};
+
+//allocate a new memory pool.
+//will throw std::runtime_error if there is an underlying pool unless the second argument is true
+resource.create_memory_pool(options2, true) 
+```
+
+> [!CAUTION]
+> It is **strongly recommended** to construct a new `tlsf_resource` instead of replacing an existing pool. This approach does not have any RAII safeguards and replacing a pool will free all of its memory back to the underlying resource. This will result in dangling pointers and use-after-free if there are objects allocated by the pool still in active scope. 
+
 ### Working with memory pools directly
 If you need a TLSF allocator but do not want to use the standard library allocator API, you can work directly with the underlying memory pool, `tlsf_pool`. It has a lower-level API consisting of `malloc_pool`, `free_pool`, `realloc_pool` and `memalign_pool`. These have the same API as the corresponding cstdlib functions.
 
+`tlsf_pool` must be constructed through the static `create` method, which returns a `std::optional` object that is empty if the pool memory allocation has failed.
 ```cpp
-tlsf_pool pool(50'000'000); //construct pool with 50M bytes - uses new and delete by default
-void* memory = pool.malloc_pool(5000);
+#include <optional>
+
+// ...
+
+std::optional<tlsf_pool> pool = tlsf_pool::create(50'000'000); //construct pool with 50M bytes - uses new and delete by default
+
+//check if pool initialization was successful
+if (pool)
+    void* memory = pool->malloc_pool(5000);
 
 ```
 `tlsf_pool` will also accept `pool_options` in the constructor. 
